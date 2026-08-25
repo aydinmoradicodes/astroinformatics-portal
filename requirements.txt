@@ -1,7 +1,9 @@
 streamlit
 lightkurve
-matplotlib
-numpy
 astropy
-plotly
+numpy
 pandas
+plotly
+scipy
+lxml
+beautifulsoup4
