@@ -5,205 +5,168 @@ import numpy as np
 import pandas as pd
 import astropy.units as u
 
-# Configure the Streamlit Page for an enterprise research appearance
+# --------------------------------------------------------------------------------
+# 1. PAGE CONFIGURATION & ACADEMIC STYLING
+# --------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Astroinformatics Research Portal", 
+    page_title="UBC Astroinformatics Research Portal", 
     page_icon="🌌", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS injection for elite Midnight Academic styling
+# Custom CSS: Professional "Dark Mode" Research Dashboard (No "Video Game" fonts)
 st.markdown("""
     <style>
     .main { background-color: #05070f; }
     h1 { color: #00bbf9 !important; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; }
     h2, h3 { color: #9b5de5 !important; }
     .stMetric { background-color: #0e1222; padding: 15px; border-radius: 10px; border: 1px solid #1e295d; }
-    div[data-testid="stMetricDelta"] > div { color: #f15bb5 !important; }
+    div[data-testid="stMetricDelta"] > div { color: #00f2ff !important; }
+    p { color: #b8c1ec; }
     </style>
 """, unsafe_allow_html=True)
 
-# Academic-Grade Header
-st.title("Astroinformatics & Exoplanetary Transit Pipeline")
+# --------------------------------------------------------------------------------
+# 2. HEADER & PROJECT IDENTITY
+# --------------------------------------------------------------------------------
+st.title("Astroinformatics & Exoplanetary Habitability Pipeline")
 st.markdown("""
-    **Research Engineer:** Aydin | **Target Institution:** University of British Columbia (UBC)
+    **Research Engineer:** Aydin | **Target Program:** UBC Combined Major (CS & Stats)
     
-    *An automated computational signal processing pipeline utilizing live telemetry from NASA's Kepler Space Telescope via the MAST Archive to isolate transits and extract physical exoplanetary characteristics.*
+    *An automated computational pipeline utilizing NASA Kepler telemetry to isolate transit signals, 
+    calculate orbital dynamics, and estimate planetary habitability (Equilibrium Temperature).*
 """)
 st.divider()
 
-# Mission Control Sidebar
-st.sidebar.header("Control Panel")
-target_star = st.sidebar.text_input("Kepler Target Star:", value="Kepler-8")
+# --------------------------------------------------------------------------------
+# 3. MISSION CONTROL SIDEBAR
+# --------------------------------------------------------------------------------
+st.sidebar.header("🔭 Instrumentation Controls")
+target_star = st.sidebar.text_input("Kepler Target ID:", value="Kepler-22")
 
-# Initialize session state for storing quarters to prevent redundant API queries
+# Session State Logic to prevent API spamming
 if "last_star" not in st.session_state or st.session_state.last_star != target_star:
     st.session_state.last_star = target_star
-    with st.spinner("Querying available NASA observation windows..."):
+    with st.spinner("Querying NASA MAST Archives..."):
         try:
-            # Force explicit string conversion for the query target
-            search_result = lk.search_lightcurve(str(target_star).strip(), author="Kepler")
-            available_quarters = sorted([int(q) for q in search_result.quarter if q is not None and not np.isnan(q)])
-            st.session_state.available_quarters = available_quarters
-        except Exception:
-            st.session_state.available_quarters = []
+            search = lk.search_lightcurve(str(target_star).strip(), author="Kepler")
+            st.session_state.quarters = sorted([int(q) for q in search.quarter if q is not None and not np.isnan(q)])
+        except:
+            st.session_state.quarters = []
 
-# Dynamically populate quarter selector based on what NASA actually has on file
-if "available_quarters" in st.session_state and st.session_state.available_quarters:
-    selected_quarter = st.sidebar.selectbox(
-        "Available Kepler Mission Quarters:", 
-        options=st.session_state.available_quarters,
-        index=0
-    )
+if "quarters" in st.session_state and st.session_state.quarters:
+    selected_quarter = st.sidebar.selectbox("Select Mission Quarter:", options=st.session_state.quarters, index=0)
 else:
-    st.sidebar.warning("Star search pending or target not found.")
+    st.sidebar.warning("Target not found in Kepler catalog.")
     selected_quarter = None
 
-bin_size = st.sidebar.slider("Phase Binning Vector Size:", min_value=5, max_value=100, value=25, step=5)
-
+bin_size = st.sidebar.slider("Phase Binning Resolution:", 5, 100, 20)
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Calculated Physical Properties")
+st.sidebar.info("**Pipeline Status:** Ready for Telemetry Ingestion.")
 
-# High-Compatibility NASA Data Fetching & Signal Cleaning Engine
-@st.cache_data(show_spinner="Streaming Live Telemetry from NASA MAST...", ttl=3600)
-def fetch_stellar_data(star, quarter):
-    if quarter is None:
-        return None, None, None
+# --------------------------------------------------------------------------------
+# 4. DATA ENGINE (ROBUST CLOUD FETCHING)
+# --------------------------------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_data(star, quarter):
+    if not quarter: return None, None, None, None
     try:
-        # Perform target lookup with explicit constraints to resolve container routing blocks
-        search_result = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
-        if len(search_result) == 0:
-            return None, None, None
+        search = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
+        if len(search) == 0: return None, None, None, None
         
-        # Pull data arrays directly into memory, disabling disk caching to circumvent cloud write permission limits
-        raw_lc = search_result[0].download(quality_bitmask='default', download_dir=None)
-        if raw_lc is None:
-            return None, None, None
-            
-        # Clean Signal: Strip missing steps, clear instruments shocks, and flatten baseline variance
-        clean_lc = raw_lc.remove_nans().remove_outliers(sigma=5).flatten(window_length=101)
+        # Download data into memory (bypassing cloud disk limits)
+        lc = search.download(quality_bitmask='default', download_dir=None)
+        if lc is None: return None, None, None, None
         
-        # Pull authentic catalog stellar radius metadata
-        try:
-            r_star = raw_lc.meta.get('RADIUS', 1.0)
-            if r_star is None or np.isnan(float(r_star)):
-                r_star = 1.0
-        except Exception:
-            r_star = 1.0
-            
-        return raw_lc, clean_lc, float(r_star)
+        # Advanced Signal Processing: Remove NaNs, Sigma Clip Outliers, Flatten Trends
+        clean_lc = lc.remove_nans().remove_outliers(sigma=5).flatten(window_length=101)
+        
+        # Extract Metadata for Physics Math
+        r_star = float(lc.meta.get('RADIUS', 1.0) or 1.0)
+        teff_star = float(lc.meta.get('TEFF', 5778.0) or 5778.0) # Star Temp (Kelvin)
+        
+        return lc, clean_lc, r_star, teff_star
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
-# Execute Pipeline
+# --------------------------------------------------------------------------------
+# 5. EXECUTION & PHYSICS CORE
+# --------------------------------------------------------------------------------
 if selected_quarter:
-    raw_lc, clean_lc, r_star = fetch_stellar_data(target_star, selected_quarter)
+    with st.spinner("Processing Deep Space Telemetry..."):
+        raw_lc, clean_lc, r_star, teff_star = fetch_data(target_star, selected_quarter)
 else:
-    raw_lc, clean_lc, r_star = None, None, None
+    raw_lc, clean_lc, r_star, teff_star = None, None, 1.0, 5778.0
 
 if clean_lc is None:
-    st.error(f"Pipeline Failure: Unable to fetch archival records for '{target_star}'. Verify object syntax (e.g., 'Kepler-10', 'Kepler-8').")
+    st.error(f"❌ Pipeline Failure: Could not retrieve data for '{target_star}'. Try 'Kepler-22' (Habitable) or 'Kepler-8'.")
 else:
-    # Periodogram Frequency Analysis via Box Least Squares (BLS)
-    with st.spinner("Executing Box Least Squares (BLS) Period Search..."):
-        periodogram = clean_lc.to_periodogram(method="bls")
-        best_period = periodogram.period_at_max_power
-        best_t0 = periodogram.transit_time_at_max_power
-        transit_depth = periodogram.depth_at_max_power.value
+    # --- A. TRANSIT DETECTION (BLS ALGORITHM) ---
+    periodogram = clean_lc.to_periodogram(method="bls")
+    best_period = periodogram.period_at_max_power
+    best_t0 = periodogram.transit_time_at_max_power
+    transit_depth = periodogram.depth_at_max_power.value
 
-    # Physical Boundary Math
-    r_ratio = np.sqrt(transit_depth)
-    actual_radius_jup = r_ratio * r_star * 9.731 
-
-    # Metrics Layout in Sidebar
-    st.sidebar.metric(label=r"Orbital Period ($P$)", value=f"{best_period.value:.5f} Days")
-    st.sidebar.metric(label=r"Stellar Flux Dimming ($\Delta F$)", value=f"{transit_depth*100:.4f}%")
-    st.sidebar.metric(label=r"Calculated Physical Radius ($R_p$)", value=f"~{actual_radius_jup:.2f} x R_Jup", delta=f"Host Star: {r_star:.2f} R_Sun")
-
-    # Data Dimensionality Folding & Safe Astropy Binning 
-    folded_lc = clean_lc.fold(period=best_period, epoch_time=best_t0)
+    # --- B. ASTROPHYSICS CALCULATIONS ---
+    # 1. Planet Radius (R_p)
+    r_planet_jup = np.sqrt(transit_depth) * r_star * 9.731
     
-    # Safely isolate time vector gaps using explicit array delta evaluation
+    # 2. Orbital Distance / Semi-Major Axis (a) using Kepler's 3rd Law
+    # Assumption: Star Mass ≈ 1 Solar Mass for approximation
+    period_years = best_period.value / 365.25
+    semi_major_axis_au = (period_years ** 2) ** (1/3)
+    
+    # 3. Equilibrium Temperature (T_eq) - The "Habitability" Check
+    r_star_au = r_star * 0.00465 # Convert Solar Radius to AU
+    # Bond Albedo assumed 0.3 (Earth-like)
+    eq_temp_k = teff_star * np.sqrt(r_star_au / (2 * semi_major_axis_au)) * ((1 - 0.3)**0.25)
+    eq_temp_c = eq_temp_k - 273.15 # Convert to Celsius
+
+    # --- C. HABITABILITY STATUS CHECK ---
+    if 0 < eq_temp_c < 100:
+        habitable_status = "🟩 POTENTIALLY HABITABLE (Liquid Water Possible)"
+    elif eq_temp_c >= 100:
+        habitable_status = "🟥 TOO HOT (Runaway Greenhouse)"
+    else:
+        habitable_status = "🟦 TOO COLD (Ice World)"
+
+    # --------------------------------------------------------------------------------
+    # 6. RESEARCH DASHBOARD (VISUALS)
+    # --------------------------------------------------------------------------------
+    
+    # Row 1: The Metrics
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Orbital Period", f"{best_period.value:.4f} Days", "Verified Periodic Signal")
+    col2.metric("Planetary Radius", f"{r_planet_jup:.2f} x Jupiter", f"Host Radius: {r_star:.2f} Sun")
+    col3.metric("Orbital Distance", f"{semi_major_axis_au:.3f} AU", "Semi-Major Axis")
+    col4.metric("Surface Temp", f"{eq_temp_c:.1f} °C", f"{habitable_status}")
+
+    # Row 2: The Plots
+    # Folding Logic
+    folded_lc = clean_lc.fold(period=best_period, epoch_time=best_t0)
     time_delta = (folded_lc.time.value[-1] - folded_lc.time.value[0]) / len(folded_lc.time.value) if len(folded_lc.time.value) > 1 else 0.02
     binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_delta) * u.day)
 
-    # Scientific Interactive Visualizations (Plotly Engine Layout)
-    tabs = st.tabs(["Full Continuous Timeline", "Phase-Folded Transit Profile", "Export Subsystem"])
+    tabs = st.tabs(["📊 Phase-Folded Transit Analysis", "🔭 Raw Telemetry Stream", "💾 Data Export"])
 
     with tabs[0]:
-        st.subheader("Continuous Telemetry Time-Series")
-        fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(
-            x=clean_lc.time.value,
-            y=clean_lc.flux.value,
-            mode='markers',
-            marker=dict(size=2, color='#9b5de5', opacity=0.6),
-            name='Stellar Flux'
-        ))
-        fig1.update_layout(
-            template="plotly_dark",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            xaxis_title="Time (Barycentric Julian Date)",
-            yaxis_title="Normalized Flux",
-            margin=dict(l=40, r=40, t=20, b=40),
-            height=450
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-        st.caption("Raw time-series data capturing continuous stellar observations over a full mission quarter.")
+        st.subheader("Phase-Folded Transit Detection")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=folded_lc.time.value, y=folded_lc.flux.value, mode='markers', name='Raw Data', marker=dict(color='#00bbf9', size=3, opacity=0.3)))
+        fig.add_trace(go.Scatter(x=binned_lc.time.value, y=binned_lc.flux.value, mode='lines+markers', name='Binned Signal', line=dict(color='#f15bb5', width=3)))
+        fig.update_layout(template="plotly_dark", height=450, xaxis_title="Orbital Phase (Days)", yaxis_title="Normalized Flux", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(f"Detected transit signal folded over {best_period.value:.4f} days. The dip represents the planet blocking starlight.")
 
     with tabs[1]:
-        st.subheader("Phase-Folded Exoplanetary Silhouette")
+        st.subheader("Continuous Light Curve")
         fig2 = go.Figure()
-        
-        # Raw folded data
-        fig2.add_trace(go.Scatter(
-            x=folded_lc.time.value,
-            y=folded_lc.flux.value,
-            mode='markers',
-            marker=dict(size=3, color='#00bbf9', opacity=0.25),
-            name='Individual Observations'
-        ))
-        
-        # Statistically binned signal
-        fig2.add_trace(go.Scatter(
-            x=binned_lc.time.value,
-            y=binned_lc.flux.value,
-            mode='markers+lines',
-            marker=dict(size=8, color='#f15bb5', symbol='circle'),
-            line=dict(width=2, color='#f15bb5'),
-            name='Statistical Phase-Binning'
-        ))
-        
-        fig2.update_layout(
-            template="plotly_dark",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            xaxis_title="Phase (Days from Mid-Transit)",
-            yaxis_title="Relative Flux Deficit",
-            margin=dict(l=40, r=40, t=20, b=40),
-            height=450
-        )
+        fig2.add_trace(go.Scatter(x=clean_lc.time.value, y=clean_lc.flux.value, mode='markers', marker=dict(color='#9b5de5', size=2)))
+        fig2.update_layout(template="plotly_dark", height=400, xaxis_title="Time (BJD)", yaxis_title="Flux", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig2, use_container_width=True)
-        st.caption("Phase folding maps hundreds of distinct observations into a unified orbital footprint to clarify the signal-to-noise ratio.")
 
     with tabs[2]:
-        st.subheader("Research Data Export Architecture")
-        
-        # Generate DataFrame safe for ingestion into data analytics pipelines
-        export_df = pd.DataFrame({
-            'Phase_Days': folded_lc.time.value,
-            'Normalized_Flux': folded_lc.flux.value
-        }).dropna()
-        
-        csv_data = export_df.to_csv(index=False).encode('utf-8')
-        
-        st.info("Admissions review option: Download the processed lightcurve matrix directly as a structured CSV for validation in NumPy/Pandas pipelines.")
-        st.download_button(
-            label="Download Phase-Folded Matrix (CSV)",
-            data=csv_data,
-            file_name=f"{target_star}_folded_telemetry.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        st.subheader("Export Processed Matrix")
+        csv = pd.DataFrame({'Phase': folded_lc.time.value, 'Flux': folded_lc.flux.value}).to_csv(index=False).encode('utf-8')
+        st.download_button("Download CSV", data=csv, file_name=f"{target_star}_analysis.csv", mime="text/csv")
