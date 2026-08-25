@@ -3,3 +3,5 @@ lightkurve
 matplotlib
 numpy
 astropy
+plotly
+pandas
