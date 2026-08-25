@@ -1,4 +1,12 @@
 import streamlit as st
+import warnings
+
+# --------------------------------------------------------------------------------
+# 0. SYSTEM CONFIGURATION (Supress Logs)
+# --------------------------------------------------------------------------------
+# Silence the "Oktopus" warning because we don't need PRF photometry
+warnings.filterwarnings("ignore", category=UserWarning, module="lightkurve")
+
 import lightkurve as lk
 import plotly.graph_objects as go
 import numpy as np
@@ -6,7 +14,7 @@ import pandas as pd
 import astropy.units as u
 
 # --------------------------------------------------------------------------------
-# 1. PAGE CONFIGURATION
+# 1. PAGE CONFIGURATION & SPACEX UI
 # --------------------------------------------------------------------------------
 st.set_page_config(
     page_title="UBC Astroinformatics Research Portal", 
@@ -15,14 +23,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: SpaceX Professional
+# Custom CSS: "SpaceX" Professional Dark Mode
 st.markdown("""
     <style>
     .main { background-color: #0b0d17; }
-    h1, h2, h3, h4, .stMarkdown, p, div { font-family: 'Helvetica Neue', sans-serif !important; }
-    h1 { color: #ffffff !important; }
+    h1, h2, h3, h4, .stMarkdown, p, div { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
+    h1 { color: #ffffff !important; font-weight: 700; }
     .stMetric { background-color: #15192b; border: 1px solid #2b3044; border-radius: 6px; padding: 15px; }
-    div[data-testid="stMetricValue"] { color: #00d4ff !important; }
+    div[data-testid="stMetricValue"] { color: #00d4ff !important; font-weight: 600; }
     [data-testid="stSidebar"] { background-color: #050608; border-right: 1px solid #2b3044; }
     </style>
 """, unsafe_allow_html=True)
@@ -45,25 +53,22 @@ st.divider()
 st.sidebar.header("🔭 Instrument Controls")
 target_star = st.sidebar.text_input("Kepler Target ID:", value="Kepler-22")
 
-# --- THE FIX: Aggressive Search Mode ---
+# Intelligent Caching
 if "last_star" not in st.session_state or st.session_state.last_star != target_star:
     st.session_state.last_star = target_star
     with st.spinner("Connecting to NASA MAST Nodes..."):
         try:
-            # FIX: Removed 'author' constraint. Now uses 'mission' which is more robust.
-            search = lk.search_lightcurve(str(target_star).strip(), mission="Kepler")
-            
-            # Filter for valid quarters only
+            # Using 'author=Kepler' is the Gold Standard for the main mission
+            search = lk.search_lightcurve(str(target_star).strip(), author="Kepler")
             valid_quarters = sorted(list(set([int(q) for q in search.quarter if q is not None and not np.isnan(q)])))
             st.session_state.quarters = valid_quarters
-        except Exception as e:
+        except Exception:
             st.session_state.quarters = []
 
 if "quarters" in st.session_state and st.session_state.quarters:
     selected_quarter = st.sidebar.selectbox("Mission Quarter:", options=st.session_state.quarters, index=0)
 else:
-    # Fallback message
-    st.sidebar.warning(f"Target '{target_star}' not found. Try entering 'KIC 10593626' (Kepler-22 ID) if name fails.")
+    st.sidebar.warning(f"Target '{target_star}' not found. Try 'Kepler-22' or 'Kepler-452'.")
     selected_quarter = None
 
 bin_size = st.sidebar.slider("Phase Binning Resolution:", 5, 100, 20)
@@ -76,11 +81,10 @@ st.sidebar.markdown("---")
 def fetch_data(star, quarter):
     if not quarter: return None, None, None, None
     try:
-        # Aggressive Download: Mission-based search
-        search = lk.search_lightcurve(str(star).strip(), mission="Kepler", quarter=int(quarter))
+        search = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
         if len(search) == 0: return None, None, None, None
         
-        # Download the first available flux file to memory
+        # Download to memory
         lc = search[0].download(quality_bitmask='default', download_dir=None)
         if lc is None: return None, None, None, None
         
@@ -121,9 +125,15 @@ else:
     eq_temp_k = teff_star * np.sqrt(r_star_au / (2 * semi_major_axis_au)) * ((1 - 0.3)**0.25)
     eq_temp_c = eq_temp_k - 273.15
 
-    if 0 < eq_temp_c < 100: hab_status = "🟩 HABITABLE (Goldilocks Zone)"
-    elif eq_temp_c >= 100: hab_status = "🟥 TOO HOT (Inside HZ)"
-    else: hab_status = "🟦 TOO COLD (Outside HZ)"
+    if 0 < eq_temp_c < 100: 
+        hab_status = "🟩 HABITABLE (Goldilocks Zone)"
+        hab_color = "#00ff00"
+    elif eq_temp_c >= 100: 
+        hab_status = "🟥 TOO HOT (Inside HZ)"
+        hab_color = "#ff4b4b"
+    else: 
+        hab_status = "🟦 TOO COLD (Outside HZ)"
+        hab_color = "#00d4ff"
 
     # --- DASHBOARD ---
     c1, c2, c3, c4 = st.columns(4)
@@ -139,6 +149,7 @@ else:
     tabs = st.tabs(["📊 Phase-Locked Transit", "🪐 Orbital Habitable Zone", "🔭 Raw Data", "💾 Export"])
 
     with tabs[0]:
+        st.subheader("Phase-Folded Light Curve")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=folded_lc.time.value, y=folded_lc.flux.value, mode='markers', marker=dict(color='#00d4ff', size=3, opacity=0.3), name='Raw Flux'))
         fig.add_trace(go.Scatter(x=binned_lc.time.value, y=binned_lc.flux.value, mode='lines+markers', line=dict(color='#ffffff', width=3), name='Binned Signal'))
@@ -146,15 +157,23 @@ else:
         st.plotly_chart(fig, use_container_width=True)
 
     with tabs[1]:
-        # ORBITAL VISUALIZER
+        st.subheader("Top-Down System Visualization")
         theta = np.linspace(0, 2*np.pi, 100)
-        hz_in, hz_out = np.sqrt((r_star**2)*((teff_star/5778)**4))*0.95, np.sqrt((r_star**2)*((teff_star/5778)**4))*1.37
+        # Luminosity approx for HZ boundaries
+        lum = (r_star**2) * ((teff_star/5778)**4)
+        hz_in, hz_out = np.sqrt(lum)*0.95, np.sqrt(lum)*1.37
         
         fig_orb = go.Figure()
+        # Draw HZ
         fig_orb.add_trace(go.Scatter(x=hz_in*np.cos(theta), y=hz_in*np.sin(theta), mode='lines', line=dict(color='rgba(0,255,0,0.2)'), showlegend=False))
         fig_orb.add_trace(go.Scatter(x=hz_out*np.cos(theta), y=hz_out*np.sin(theta), mode='lines', line=dict(color='rgba(0,255,0,0.2)'), fill='tonexty', fillcolor='rgba(0,255,0,0.1)', name='Habitable Zone'))
-        fig_orb.add_trace(go.Scatter(x=semi_major_axis_au*np.cos(theta), y=semi_major_axis_au*np.sin(theta), mode='lines', line=dict(color='#ffffff', dash='dash'), name='Planet Orbit'))
+        # Draw Orbit
+        fig_orb.add_trace(go.Scatter(x=semi_major_axis_au*np.cos(theta), y=semi_major_axis_au*np.sin(theta), mode='lines', line=dict(color=hab_color, dash='dash', width=2), name='Planet Orbit'))
+        # Draw Star
         fig_orb.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(color='#ffcc00', size=15), name='Star'))
+        # Draw Planet
+        fig_orb.add_trace(go.Scatter(x=[semi_major_axis_au], y=[0], mode='markers', marker=dict(color=hab_color, size=10, line=dict(color='white', width=1)), name='Exoplanet'))
+        
         fig_orb.update_layout(template="plotly_dark", height=600, width=600, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=True)
         st.plotly_chart(fig_orb, use_container_width=True)
 
