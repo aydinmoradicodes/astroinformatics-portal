@@ -42,7 +42,8 @@ if "last_star" not in st.session_state or st.session_state.last_star != target_s
     st.session_state.last_star = target_star
     with st.spinner("Querying available NASA observation windows..."):
         try:
-            search_result = lk.search_lightcurve(str(target_star), author="Kepler")
+            # Force explicit string conversion for the query target
+            search_result = lk.search_lightcurve(str(target_star).strip(), author="Kepler")
             available_quarters = sorted([int(q) for q in search_result.quarter if q is not None and not np.isnan(q)])
             st.session_state.available_quarters = available_quarters
         except Exception:
@@ -70,13 +71,13 @@ def fetch_stellar_data(star, quarter):
     if quarter is None:
         return None, None, None
     try:
-        # Explicit variable casting to ensure secure cloud system parameter passing
-        search_result = lk.search_lightcurve(str(star), author="Kepler", quarter=int(quarter))
+        # Perform target lookup with explicit constraints to resolve container routing blocks
+        search_result = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
         if len(search_result) == 0:
             return None, None, None
         
-        # Download telemetry utilizing standard quality masking settings
-        raw_lc = search_result.download(quality_bitmask='default')
+        # Pull data arrays directly into memory, disabling disk caching to circumvent cloud write permission limits
+        raw_lc = search_result[0].download(quality_bitmask='default', download_dir=None)
         if raw_lc is None:
             return None, None, None
             
