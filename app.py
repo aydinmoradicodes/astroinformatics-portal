@@ -36,7 +36,7 @@ st.markdown("""
 # --------------------------------------------------------------------------------
 st.title("Astroinformatics & Exoplanetary Habitability Pipeline")
 st.markdown("""
-    **Principal Investigator:** Aydin | **Target Institution:** University of British Columbia (UBC)
+    **Principal Investigator:** Aydin Moradi | **Target Institution:** University of British Columbia (UBC)
     
     *An automated signal processing pipeline utilizing NASA Kepler telemetry to isolate transit signals, 
     simulate real-time orbital dynamics, and estimate planetary habitability potential.*
@@ -176,7 +176,7 @@ else:
         
         binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_delta) * u.day)
 
-        tabs = st.tabs(["📊 Phase-Locked Transit", "🪐 Orbital Habitable Zone", "🔭 Raw Data", "💾 Export"])
+        tabs = st.tabs([" Phase-Locked Transit", " Orbital Habitable Zone", " Raw Data", " Export"])
 
         with tabs[0]:
             st.subheader("Phase-Folded Light Curve")
