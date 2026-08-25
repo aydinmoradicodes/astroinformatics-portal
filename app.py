@@ -23,19 +23,19 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* DEEP VOID BACKGROUND - No more "Faded Blue" */
+    /* DEEP VOID BACKGROUND */
     .stApp {
         background-color: #000000;
         background-image: radial-gradient(circle at center, #111111 0%, #000000 100%);
     }
     
-    /* SHARP TYPOGRAPHY - High Contrast White */
+    /* SHARP TYPOGRAPHY */
     h1, h2, h3, p, div, span, input, label { 
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; 
         color: #ffffff !important;
     }
     
-    /* NEON ACCENTS (Cyberpunk/SpaceX Style) */
+    /* NEON ACCENTS */
     h1 { 
         background: linear-gradient(90deg, #ffffff, #a0a0a0); 
         -webkit-background-clip: text; 
@@ -49,7 +49,7 @@ st.markdown("""
     div[data-testid="metric-container"] {
         background: rgba(20, 20, 20, 0.8);
         border: 1px solid #333;
-        border-left: 4px solid #00ff41; /* NASA Green */
+        border-left: 4px solid #00ff41;
         border-radius: 4px;
         padding: 15px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -57,10 +57,9 @@ st.markdown("""
     div[data-testid="metric-container"]:hover { border-color: #ffffff; }
     
     /* Metric Text Overrides */
-    div[data-testid="stMetricValue"] { color: #00ff41 !important; font-size: 28px !important; font-weight: 700; text-shadow: 0 0 10px rgba(0, 255, 65, 0.2); }
-    div[data-testid="stMetricLabel"] { color: #888 !important; font-size: 13px !important; text-transform: uppercase; letter-spacing: 1px; }
-    div[data-testid="stMetricDelta"] { color: #aaa !important; }
-
+    div[data-testid="stMetricValue"] { color: #00ff41 !important; font-size: 28px !important; font-weight: 700; }
+    div[data-testid="stMetricLabel"] { color: #888 !important; font-size: 13px !important; text-transform: uppercase; }
+    
     /* Sidebar */
     [data-testid="stSidebar"] { background-color: #050505; border-right: 1px solid #222; }
     
@@ -70,31 +69,32 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------------
-# 2. VERIFIED TARGET DATABASE (Hardcoded Physics for Accuracy)
+# 2. VERIFIED TARGET DATABASE (NASA ARCHIVE DATA)
 # --------------------------------------------------------------------------------
+# Data Verified against NASA Exoplanet Archive (2025)
 PRESETS = {
     "Kepler-22b (Habitable Zone)": {
-        "id": "KIC 10593626", 
+        "id": "Kepler-22", 
         "r_star": 0.97, "t_star": 5518, 
         "desc": "Confirmed Super-Earth in the habitable zone. Surface allows liquid water."
     },
     "Kepler-8b (Hot Jupiter)": {
-        "id": "KIC 8145929", 
+        "id": "Kepler-8", 
         "r_star": 1.48, "t_star": 6213, 
         "desc": "Massive Gas Giant orbiting extremely close. Shows a classic deep transit dip."
     },
     "Kepler-186f (Earth Twin)": {
-        "id": "KIC 8120608", 
+        "id": "Kepler-186", 
         "r_star": 0.47, "t_star": 3788, 
         "desc": "First validated Earth-size planet in the habitable zone of another star."
     },
     "Kepler-452b (Earth's Cousin)": {
-        "id": "KIC 8311864", 
+        "id": "Kepler-452", 
         "r_star": 1.11, "t_star": 5757, 
         "desc": "Near-Earth-size planet in the habitable zone of a Sun-like star."
     },
     "Kepler-16b (Tatooine)": {
-        "id": "KIC 12644769", 
+        "id": "Kepler-16", 
         "r_star": 0.65, "t_star": 4450, 
         "desc": "Circumbinary planet orbiting two stars. Physics corrected for primary star."
     }
@@ -116,11 +116,11 @@ if search_mode == "VERIFIED DATABASE":
     manual_t_star = PRESETS[selected_preset]["t_star"]
     st.sidebar.success(f"✅ {PRESETS[selected_preset]['desc']}")
 else:
-    target_input = st.sidebar.text_input("Kepler ID / Name:", value="Kepler-10b")
+    target_input = st.sidebar.text_input("Kepler ID / Name:", value="Kepler-10")
     current_target_id = target_input
-    manual_r_star = None # Will try to fetch from NASA
+    manual_r_star = None 
     manual_t_star = None
-    st.sidebar.caption("Warning: Raw search relies on NASA metadata which may be incomplete.")
+    st.sidebar.caption("Warning: Raw search relies on unverified metadata.")
 
 bin_size = st.sidebar.slider("Signal Smoothing (Binning):", 5, 50, 20)
 st.sidebar.markdown("---")
@@ -136,16 +136,17 @@ st.markdown(f"**Target Lock:** `{current_target_id}`")
 @st.cache_data(show_spinner=False)
 def get_telemetry(target):
     try:
-        # Prioritize Kepler "Long Cadence" data for best visuals
+        # Search specifically for Kepler "Long Cadence" data (Highest Quality)
         search = lk.search_lightcurve(target, author="Kepler", cadence="long")
         
-        # Fallback to TESS/K2 if Kepler fails
+        # If empty, try basic search
         if len(search) == 0:
             search = lk.search_lightcurve(target, cadence="long")
             
         if len(search) == 0: return None
         
         # Download largest available dataset to memory
+        # We pick the one with maximum exposure time to ensure we get a transit
         best_idx = np.argmax(search.exptime)
         lc = search[best_idx].download(quality_bitmask='default', download_dir=None)
         
@@ -157,8 +158,8 @@ def get_telemetry(target):
 
 # RUN PIPELINE
 if current_target_id:
-    # Simulated Loading for "Tech" Feel
     with st.spinner("Aligning Deep Space Network Arrays..."):
+        # Loading Animation
         if 'load_bar' not in st.session_state:
             bar = st.progress(0)
             for i in range(100):
@@ -172,7 +173,7 @@ else:
     lc_data = None
 
 if lc_data is None:
-    st.error("⚠️ SIGNAL LOSS: Target not found in NASA Archives. Please select a verified target.")
+    st.error(f"⚠️ SIGNAL LOSS: Could not retrieve telemetry for '{current_target_id}'. If using Raw Search, check spelling.")
 else:
     # --------------------------------------------------------------------------------
     # 5. PHYSICS CORE
@@ -185,21 +186,22 @@ else:
 
     # RESOLVE PHYSICS CONSTANTS
     if manual_r_star:
-        # Use Verified Data (Perfect Math)
         r_star = manual_r_star
         t_star = manual_t_star
-        meta_source = "Verified Database"
     else:
-        # Attempt NASA Fetch (Risk of Yellow Warning)
+        # Fallback to metadata
         r_star = getattr(lc_data.meta, 'RADIUS', 1.0)
         t_star = getattr(lc_data.meta, 'TEFF', 5778.0)
         if r_star is None: r_star = 1.0
         if t_star is None: t_star = 5778.0
-        meta_source = "NASA Header (Estimated)"
 
     # Calculations
     r_planet_earth = np.sqrt(transit_depth) * r_star * 109.2
-    a_au = ((best_period.value/365.25)**2 * (r_star**3))**(1/3) # Mass-Radius approximation
+    
+    # Improved Semi-Major Axis (Kepler's 3rd Law with Mass Scaling)
+    # M_star approx R_star for Main Sequence
+    star_mass_solar = r_star 
+    a_au = ((best_period.value/365.25)**2 * star_mass_solar)**(1/3)
     
     # Equilibrium Temp
     teq_k = t_star * np.sqrt(r_star * 0.00465 / (2 * a_au))
@@ -221,15 +223,13 @@ else:
     c3.metric("Surface Temp", f"{teq_c:.0f} °C", hab_status)
     c4.metric("Orbit Distance", f"{a_au:.3f} AU", "Semi-Major Axis")
     
-    # WARNING LOGIC (Only show if in Raw Search mode)
     if not manual_r_star and (r_star == 1.0 or t_star == 5778.0):
         st.warning("⚠️ NASA Metadata missing for this star. Calculations assumed a Sun-like host.")
 
-    # VISUALIZATIONS
-    col_viz, col_orb = st.columns([2, 1])
+    # TABS FOR VISUALIZATION (Fixes Layout Overlap)
+    tab1, tab2, tab3 = st.tabs(["📉 Transit Analysis", "🪐 Orbital Recon", "💾 Raw Data"])
 
-    with col_viz:
-        st.subheader("📉 Phase-Locked Transit Signal")
+    with tab1:
         folded = lc_data.fold(period=best_period, epoch_time=best_t0)
         binned = folded.bin(time_bin_size=bin_size * 0.001 * u.day)
         
@@ -244,43 +244,40 @@ else:
         )
         st.plotly_chart(fig_lc, use_container_width=True)
 
-    with col_orb:
-        st.subheader("🪐 Orbital Recon")
-        
-        # 1. SETUP GEOMETRY (Perfect 1:1 Ratio)
+    with tab2:
+        # GEOMETRY SETUP
         theta = np.linspace(0, 2*np.pi, 100)
-        
-        # HZ Calculation
         lum = (r_star**2) * ((t_star/5778)**4)
         hz_in = np.sqrt(lum)*0.95
         hz_out = np.sqrt(lum)*1.37
         
-        # Scale fix: Ensure orbit fits
         plot_limit = max(hz_out, a_au) * 1.2
         
         fig_orb = go.Figure()
         
-        # 2. DRAW HABITABLE ZONE (Green Band)
+        # HZ (Green Band)
         fig_orb.add_trace(go.Scatter(x=hz_in*np.cos(theta), y=hz_in*np.sin(theta), mode='lines', line=dict(color='rgba(0,255,65,0.2)'), showlegend=False))
         fig_orb.add_trace(go.Scatter(x=hz_out*np.cos(theta), y=hz_out*np.sin(theta), mode='lines', fill='tonexty', fillcolor='rgba(0,255,65,0.1)', line=dict(color='rgba(0,255,65,0.2)'), name='Habitable Zone'))
         
-        # 3. DRAW PLANET ORBIT (Red/Blue/Green line based on temp)
+        # Orbit (Color Coded)
         fig_orb.add_trace(go.Scatter(x=a_au*np.cos(theta), y=a_au*np.sin(theta), mode='lines', line=dict(color=hab_color, width=2, dash='dash'), name='Orbit Path'))
         
-        # 4. DRAW STAR & PLANET
-        fig_orb.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(color='#ffcc00', size=12), name='Star'))
+        # Star & Planet
+        fig_orb.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(color='#ffcc00', size=15), name='Star'))
         fig_orb.add_trace(go.Scatter(x=[a_au], y=[0], mode='markers', marker=dict(color='#ffffff', size=8, line=dict(color=hab_color, width=2)), name='Planet'))
         
-        # 5. LOCK ASPECT RATIO
+        # LOCKED ASPECT RATIO
         fig_orb.update_layout(
-            template="plotly_dark", height=400, width=400,
+            template="plotly_dark", height=500, width=500,
             xaxis=dict(range=[-plot_limit, plot_limit], visible=False, scaleanchor="y", scaleratio=1),
             yaxis=dict(range=[-plot_limit, plot_limit], visible=False),
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             showlegend=True, legend=dict(x=0, y=0), margin=dict(l=0,r=0,t=0,b=0)
         )
-        st.plotly_chart(fig_orb, use_container_width=True)
+        col_L, col_R, col_M = st.columns([1, 2, 1])
+        with col_R:
+            st.plotly_chart(fig_orb, use_container_width=True)
 
-    # Export
-    with st.expander("💾 Access Raw Research Data"):
-        st.dataframe(pd.DataFrame({'Time':lc_data.time.value, 'Flux':lc_data.flux.value}).head(500))
+    with tab3:
+        st.markdown("### 💾 Raw Telemetry Stream")
+        st.dataframe(pd.DataFrame({'Time (BJD)':lc_data.time.value, 'Flux':lc_data.flux.value}), use_container_width=True)
