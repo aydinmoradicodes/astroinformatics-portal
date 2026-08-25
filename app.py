@@ -1,10 +1,7 @@
 import streamlit as st
 import warnings
 
-# --------------------------------------------------------------------------------
-# 0. SYSTEM CONFIGURATION (Supress Logs)
-# --------------------------------------------------------------------------------
-# Silence the "Oktopus" warning because we don't need PRF photometry
+# 0. SYSTEM CONFIGURATION
 warnings.filterwarnings("ignore", category=UserWarning, module="lightkurve")
 
 import lightkurve as lk
@@ -23,15 +20,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: "SpaceX" Professional Dark Mode
+# SpaceX Styling
 st.markdown("""
     <style>
     .main { background-color: #0b0d17; }
-    h1, h2, h3, h4, .stMarkdown, p, div { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
+    h1, h2, h3, h4, p, div, span { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
     h1 { color: #ffffff !important; font-weight: 700; }
     .stMetric { background-color: #15192b; border: 1px solid #2b3044; border-radius: 6px; padding: 15px; }
     div[data-testid="stMetricValue"] { color: #00d4ff !important; font-weight: 600; }
     [data-testid="stSidebar"] { background-color: #050608; border-right: 1px solid #2b3044; }
+    .stSelectbox div[data-baseweb="select"] > div { background-color: #15192b; color: white; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -51,24 +49,37 @@ st.divider()
 # 3. ROBUST SIDEBAR SEARCH
 # --------------------------------------------------------------------------------
 st.sidebar.header("🔭 Instrument Controls")
-target_star = st.sidebar.text_input("Kepler Target ID:", value="Kepler-22")
+target_star = st.sidebar.text_input("Kepler Target ID:", value="KIC 10593626") # Default to ID for safety
+st.sidebar.caption("Try: 'Kepler-22' or 'KIC 10593626'")
 
-# Intelligent Caching
+# CACHING & SEARCH LOGIC
 if "last_star" not in st.session_state or st.session_state.last_star != target_star:
     st.session_state.last_star = target_star
     with st.spinner("Connecting to NASA MAST Nodes..."):
         try:
-            # Using 'author=Kepler' is the Gold Standard for the main mission
-            search = lk.search_lightcurve(str(target_star).strip(), author="Kepler")
+            # STRATEGY 1: Search by Mission (Most robust)
+            search = lk.search_lightcurve(str(target_star).strip(), mission="Kepler")
+            
+            # STRATEGY 2: Fallback (Broad Search)
+            if len(search) == 0:
+                search = lk.search_lightcurve(str(target_star).strip())
+            
+            # Filter for valid quarters
             valid_quarters = sorted(list(set([int(q) for q in search.quarter if q is not None and not np.isnan(q)])))
             st.session_state.quarters = valid_quarters
-        except Exception:
+            st.session_state.search_error = None
+        except Exception as e:
             st.session_state.quarters = []
+            st.session_state.search_error = str(e)
 
 if "quarters" in st.session_state and st.session_state.quarters:
     selected_quarter = st.sidebar.selectbox("Mission Quarter:", options=st.session_state.quarters, index=0)
+    st.sidebar.success("✅ Target Locked")
 else:
-    st.sidebar.warning(f"Target '{target_star}' not found. Try 'Kepler-22' or 'Kepler-452'.")
+    if "search_error" in st.session_state and st.session_state.search_error:
+        st.sidebar.error(f"NASA Connection Error: {st.session_state.search_error}")
+    else:
+        st.sidebar.warning(f"Target '{target_star}' not found. Try using the KIC ID: 'KIC 10593626'")
     selected_quarter = None
 
 bin_size = st.sidebar.slider("Phase Binning Resolution:", 5, 100, 20)
@@ -81,7 +92,8 @@ st.sidebar.markdown("---")
 def fetch_data(star, quarter):
     if not quarter: return None, None, None, None
     try:
-        search = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
+        # Search specifically for this quarter
+        search = lk.search_lightcurve(str(star).strip(), quarter=int(quarter))
         if len(search) == 0: return None, None, None, None
         
         # Download to memory
@@ -109,7 +121,7 @@ else:
     raw_lc, clean_lc, r_star, teff_star = None, None, 1.0, 5778.0
 
 if clean_lc is None:
-    st.error("Waiting for valid telemetry stream...")
+    st.info("Waiting for valid telemetry stream... (Check sidebar input)")
 else:
     # --- PHYSICS ENGINE ---
     periodogram = clean_lc.to_periodogram(method="bls")
@@ -159,19 +171,14 @@ else:
     with tabs[1]:
         st.subheader("Top-Down System Visualization")
         theta = np.linspace(0, 2*np.pi, 100)
-        # Luminosity approx for HZ boundaries
         lum = (r_star**2) * ((teff_star/5778)**4)
         hz_in, hz_out = np.sqrt(lum)*0.95, np.sqrt(lum)*1.37
         
         fig_orb = go.Figure()
-        # Draw HZ
         fig_orb.add_trace(go.Scatter(x=hz_in*np.cos(theta), y=hz_in*np.sin(theta), mode='lines', line=dict(color='rgba(0,255,0,0.2)'), showlegend=False))
         fig_orb.add_trace(go.Scatter(x=hz_out*np.cos(theta), y=hz_out*np.sin(theta), mode='lines', line=dict(color='rgba(0,255,0,0.2)'), fill='tonexty', fillcolor='rgba(0,255,0,0.1)', name='Habitable Zone'))
-        # Draw Orbit
         fig_orb.add_trace(go.Scatter(x=semi_major_axis_au*np.cos(theta), y=semi_major_axis_au*np.sin(theta), mode='lines', line=dict(color=hab_color, dash='dash', width=2), name='Planet Orbit'))
-        # Draw Star
         fig_orb.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(color='#ffcc00', size=15), name='Star'))
-        # Draw Planet
         fig_orb.add_trace(go.Scatter(x=[semi_major_axis_au], y=[0], mode='markers', marker=dict(color=hab_color, size=10, line=dict(color='white', width=1)), name='Exoplanet'))
         
         fig_orb.update_layout(template="plotly_dark", height=600, width=600, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=True)
