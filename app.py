@@ -42,14 +42,14 @@ if "last_star" not in st.session_state or st.session_state.last_star != target_s
     st.session_state.last_star = target_star
     with st.spinner("Querying available NASA observation windows..."):
         try:
-            search_result = lk.search_lightcurve(target_star, author="Kepler")
+            search_result = lk.search_lightcurve(str(target_star), author="Kepler")
             available_quarters = sorted([int(q) for q in search_result.quarter if q is not None and not np.isnan(q)])
             st.session_state.available_quarters = available_quarters
         except Exception:
             st.session_state.available_quarters = []
 
 # Dynamically populate quarter selector based on what NASA actually has on file
-if st.session_state.available_quarters:
+if "available_quarters" in st.session_state and st.session_state.available_quarters:
     selected_quarter = st.sidebar.selectbox(
         "Available Kepler Mission Quarters:", 
         options=st.session_state.available_quarters,
@@ -64,33 +64,34 @@ bin_size = st.sidebar.slider("Phase Binning Vector Size:", min_value=5, max_valu
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📊 Calculated Physical Properties")
 
-# 📡 Optimized Live Data Fetching & Signal Cleaning Engine
+# 📡 High-Compatibility NASA Data Fetching & Signal Cleaning Engine
 @st.cache_data(show_spinner="Streaming Live Telemetry from NASA MAST...", ttl=3600)
 def fetch_stellar_data(star, quarter):
     if quarter is None:
         return None, None, None
     try:
-        search_result = lk.search_lightcurve(star, author="Kepler", quarter=quarter)
+        # Explicit variable casting to ensure secure cloud system parameter passing
+        search_result = lk.search_lightcurve(str(star), author="Kepler", quarter=int(quarter))
         if len(search_result) == 0:
             return None, None, None
         
-        raw_lc = search_result.download()
-        
-        # 🧼 ADVANCED SIGNAL PROCESSING: 
-        # 1. Remove missing values (NaNs)
-        # 2. Sigma-clip outliers (remove sudden cosmic ray instrumentation spikes)
-        # 3. High-pass filter optimization to flatten out stellar variability trends
+        # Download telemetry utilizing standard quality masking settings
+        raw_lc = search_result.download(quality_bitmask='default')
+        if raw_lc is None:
+            return None, None, None
+            
+        # Clean Signal: Strip missing steps, clear instruments shocks, and flatten baseline variance
         clean_lc = raw_lc.remove_nans().remove_outliers(sigma=5).flatten(window_length=101)
         
-        # Pull authentic Stellar Radius from Kepler Input Catalog metadata if available
+        # Pull authentic catalog stellar radius metadata
         try:
             r_star = raw_lc.meta.get('RADIUS', 1.0)
-            if r_star is None or np.isnan(r_star):
+            if r_star is None or np.isnan(float(r_star)):
                 r_star = 1.0
         except Exception:
             r_star = 1.0
             
-        return raw_lc, clean_lc, r_star
+        return raw_lc, clean_lc, float(r_star)
     except Exception:
         return None, None, None
 
@@ -111,11 +112,7 @@ else:
         transit_depth = periodogram.depth_at_max_power.value
 
     # 📐 Physical Boundary Math
-    # Physics formula: Depth = (R_planet / R_star)^2
     r_ratio = np.sqrt(transit_depth)
-    
-    # Calculate real physical size using Kepler catalog metadata
-    # 1 Solar Radius ≈ 9.731 Jupiter Radii
     actual_radius_jup = r_ratio * r_star * 9.731 
 
     # Metrics Layout in Sidebar
@@ -123,14 +120,14 @@ else:
     st.sidebar.metric(label=r"Stellar Flux Dimming ($\Delta F$)", value=f"{transit_depth*100:.4f}%")
     st.sidebar.metric(label=r"Calculated Physical Radius ($R_p$)", value=f"~{actual_radius_jup:.2f} x R_Jup", delta=f"Host Star: {r_star:.2f} R_Sun")
 
-    # 🎚️ Data Dimensionality Folding & Safe Astropy Binning (Bug Fixed)
+    # 🎚️ Data Dimensionality Folding & Safe Astropy Binning 
     folded_lc = clean_lc.fold(period=best_period, epoch_time=best_t0)
     
-    # Calculate dynamic timing step values safely using Astropy time units
-    time_step = (folded_lc.time.value[1] - folded_lc.time.value[0]) if len(folded_lc.time.value) > 1 else 0.02
-    binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_step) * u.day)
+    # Safely isolate time vector gaps using explicit array delta evaluation
+    time_delta = (folded_lc.time.value[-1] - folded_lc.time.value[0]) / len(folded_lc.time.value) if len(folded_lc.time.value) > 1 else 0.02
+    binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_delta) * u.day)
 
-    # 📊 Scientific Interactive Visualizations (Plotly Engine)
+    # 📊 Scientific Interactive Visualizations (Plotly Engine Layout)
     tabs = st.tabs(["📡 Full Continuous Timeline", "🎯 Phase-Folded Transit Profile", "💾 Export Subsystem"])
 
     with tabs[0]:
@@ -205,7 +202,7 @@ else:
         st.download_button(
             label="📥 Download Phase-Folded Matrix (CSV)",
             data=csv_data,
-            file_name=f"{target_star}_Q{selected_quarter}_folded_telemetry.csv",
+            file_name=f"{target_star}_folded_telemetry.csv",
             mime="text/csv",
             use_container_width=True
         )
