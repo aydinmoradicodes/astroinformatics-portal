@@ -2,7 +2,6 @@ import streamlit as st
 import warnings
 
 # 0. SYSTEM CONFIGURATION
-# Suppress the "Oktopus" warning
 warnings.filterwarnings("ignore", category=UserWarning, module="lightkurve")
 
 import lightkurve as lk
@@ -21,7 +20,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: Deep Space Theme
 st.markdown("""
     <style>
     .main { background-color: #0b0d17; }
@@ -46,10 +44,9 @@ st.markdown("""
 st.divider()
 
 # --------------------------------------------------------------------------------
-# 3. ROBUST SIDEBAR SEARCH (The Fix)
+# 3. ROBUST SIDEBAR SEARCH (AUTO-PILOT ENABLED)
 # --------------------------------------------------------------------------------
 st.sidebar.header("🔭 Instrument Controls")
-# Default to the ID that works (KIC 10593626 = Kepler-22)
 target_star = st.sidebar.text_input("Kepler Target ID:", value="KIC 10593626")
 st.sidebar.caption("Try: 'Kepler-22' or 'KIC 10593626'")
 
@@ -58,54 +55,59 @@ if "last_star" not in st.session_state or st.session_state.last_star != target_s
     st.session_state.last_star = target_star
     with st.spinner("Connecting to NASA MAST Nodes..."):
         try:
-            # 1. Search for the star
-            search = lk.search_lightcurve(str(target_star).strip(), author="Kepler")
+            # BROAD SEARCH: Grab anything matching the ID
+            search = lk.search_lightcurve(str(target_star).strip())
             
-            # 2. CRITICAL FIX: Check if we actually found data AND if it has quarters
             if len(search) > 0:
-                # Check if the 'quarter' column exists in the table to prevent the crash
+                # Try to find quarters
                 if 'quarter' in search.table.columns:
-                    # Filter for valid quarters
                     valid_quarters = sorted(list(set([int(q) for q in search.quarter if q is not None and not np.isnan(q)])))
                     st.session_state.quarters = valid_quarters
-                    st.session_state.search_error = None
                 else:
-                    st.session_state.quarters = []
-                    st.session_state.search_error = "Data found, but missing 'Quarter' attribute (Likely TESS/K2 data)."
+                    # FALLBACK: If quarters missing, create a dummy list so the app proceeds
+                    st.session_state.quarters = ["Auto-Select"]
+                st.session_state.search_error = None
             else:
                 st.session_state.quarters = []
-                st.session_state.search_error = "Target not found in Kepler Prime Catalog."
+                st.session_state.search_error = "Target not found in NASA Catalog."
                 
         except Exception as e:
             st.session_state.quarters = []
             st.session_state.search_error = f"Connection Error: {str(e)}"
 
-# QUARTER SELECTOR
+# QUARTER SELECTOR OR AUTO-SELECT
 if "quarters" in st.session_state and st.session_state.quarters:
-    selected_quarter = st.sidebar.selectbox("Mission Quarter:", options=st.session_state.quarters, index=0)
-    st.sidebar.success("✅ Target Locked")
+    if st.session_state.quarters == ["Auto-Select"]:
+        st.sidebar.success("✅ Data Found (Auto-Mode)")
+        selected_quarter = "Auto"
+    else:
+        selected_quarter = st.sidebar.selectbox("Mission Quarter:", options=st.session_state.quarters, index=0)
+        st.sidebar.success("✅ Target Locked")
 else:
     if "search_error" in st.session_state and st.session_state.search_error:
         st.sidebar.warning(f"⚠️ {st.session_state.search_error}")
     else:
-        st.sidebar.warning("Target not found. Please check spelling.")
+        st.sidebar.warning("Target not found. Check spelling.")
     selected_quarter = None
 
 bin_size = st.sidebar.slider("Phase Binning Resolution:", 5, 100, 20)
 st.sidebar.markdown("---")
 
 # --------------------------------------------------------------------------------
-# 4. DATA ENGINE
+# 4. DATA ENGINE (ROBUST DOWNLOAD)
 # --------------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_data(star, quarter):
-    if not quarter: return None, None, None, None
     try:
-        # Strict Search
-        search = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
+        if quarter == "Auto":
+            search = lk.search_lightcurve(str(star).strip())
+        else:
+            search = lk.search_lightcurve(str(star).strip(), quarter=int(quarter))
+            
         if len(search) == 0: return None, None, None, None
         
-        # Download (Memory Only)
+        # DOWNLOAD FIRST AVAILABLE RESULT (Memory Only)
+        # This bypasses the specific quarter check if we are in Auto Mode
         lc = search[0].download(quality_bitmask='default', download_dir=None)
         if lc is None: return None, None, None, None
         
@@ -124,7 +126,7 @@ def fetch_data(star, quarter):
 # 5. EXECUTION CORE
 # --------------------------------------------------------------------------------
 if selected_quarter:
-    with st.spinner(f"Ingesting Telemetry for {target_star} (Q{selected_quarter})..."):
+    with st.spinner(f"Ingesting Telemetry for {target_star}..."):
         raw_lc, clean_lc, r_star, teff_star = fetch_data(target_star, selected_quarter)
 else:
     raw_lc, clean_lc, r_star, teff_star = None, None, 1.0, 5778.0
@@ -165,12 +167,13 @@ else:
         c4.metric("Surface Temp", f"{eq_temp_c:.0f} °C", hab_status)
 
         folded_lc = clean_lc.fold(period=best_period, epoch_time=best_t0)
-        # Safe Time Delta Calculation
+        
+        # Safe Time Delta
         if len(folded_lc.time.value) > 1:
             time_delta = (folded_lc.time.value[-1] - folded_lc.time.value[0]) / len(folded_lc.time.value)
         else:
             time_delta = 0.02
-            
+        
         binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_delta) * u.day)
 
         tabs = st.tabs(["📊 Phase-Locked Transit", "🪐 Orbital Habitable Zone", "🔭 Raw Data", "💾 Export"])
