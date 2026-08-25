@@ -65,7 +65,7 @@ if "last_star" not in st.session_state or st.session_state.last_star != target_s
                 search = lk.search_lightcurve(str(target_star).strip())
             
             # Filter for valid quarters
-            valid_quarters = sorted(list(set([int(q) for q in search.quarter if q is not None and not np.isnan(q)])))
+            valid_quarters = sorted(list(set([int(q) for q in search["quarter"] if q is not None and not np.isnan(q)])))
             st.session_state.quarters = valid_quarters
             st.session_state.search_error = None
         except Exception as e:
