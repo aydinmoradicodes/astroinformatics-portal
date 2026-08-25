@@ -119,9 +119,9 @@ else:
     actual_radius_jup = r_ratio * r_star * 9.731 
 
     # Metrics Layout in Sidebar
-    st.sidebar.metric(label="Orbital Period ($P$)", value=f"{best_period.value:.5f} Days")
-    st.sidebar.metric(label="Stellar Flux Dimming ($\Delta F$)", value=f"{transit_depth*100:.4f}%")
-    st.sidebar.metric(label="Calculated Physical Radius ($R_p$)", value=f"~{actual_radius_jup:.2f} x R_Jup", delta=f"Host Star: {r_star:.2f} R_Sun")
+    st.sidebar.metric(label=r"Orbital Period ($P$)", value=f"{best_period.value:.5f} Days")
+    st.sidebar.metric(label=r"Stellar Flux Dimming ($\Delta F$)", value=f"{transit_depth*100:.4f}%")
+    st.sidebar.metric(label=r"Calculated Physical Radius ($R_p$)", value=f"~{actual_radius_jup:.2f} x R_Jup", delta=f"Host Star: {r_star:.2f} R_Sun")
 
     # 🎚️ Data Dimensionality Folding & Safe Astropy Binning (Bug Fixed)
     folded_lc = clean_lc.fold(period=best_period, epoch_time=best_t0)
