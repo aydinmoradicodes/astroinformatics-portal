@@ -4,47 +4,51 @@ import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
 import astropy.units as u
-from datetime import datetime
 
 # --------------------------------------------------------------------------------
-# 1. PAGE CONFIGURATION & PROFESSIONAL STYLING
+# 1. PAGE CONFIGURATION & SPACEX-STYLE UI
 # --------------------------------------------------------------------------------
 st.set_page_config(
     page_title="UBC Astroinformatics Research Portal", 
-    page_icon="🌌", 
+    page_icon="🛰️", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: "SpaceX" Style - Clean, Dark, Data-Dense, No "Game" Fonts
+# Custom CSS: "SpaceX" Professional Dark Mode
 st.markdown("""
     <style>
-    /* Main Background: Deep Space Black/Blue (Professional) */
+    /* Main Background: Deep Space Black */
     .main { background-color: #0b0d17; }
     
-    /* Typography: Helvetica/Inter (Standard Scientific Fonts) */
-    h1, h2, h3, h4, .stMarkdown, p, div { font-family: 'Helvetica Neue', sans-serif !important; }
+    /* Typography: Modern Sans-Serif (Aerospace Style) */
+    h1, h2, h3, h4, .stMarkdown, p, div { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
     
     /* Headers */
-    h1 { color: #ffffff !important; font-weight: 700; letter-spacing: -1px; }
+    h1 { color: #ffffff !important; font-weight: 700; letter-spacing: -0.5px; }
     h2, h3 { color: #a0aab5 !important; font-weight: 400; }
     
-    /* Metric Cards: Clean, Flat, High-Contrast */
-    div[data-testid="stMetricValue"] { font-size: 24px !important; color: #00d4ff !important; }
-    div[data-testid="stMetricLabel"] { font-size: 14px !important; color: #8d99ae !important; text-transform: uppercase; }
-    .stMetric { background-color: #15192b; border: 1px solid #2b3044; border-radius: 4px; padding: 10px; }
+    /* Metric Cards: High Contrast & Flat */
+    div[data-testid="stMetricValue"] { font-size: 28px !important; color: #00d4ff !important; font-weight: 600; }
+    div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #8d99ae !important; text-transform: uppercase; letter-spacing: 1px; }
+    .stMetric { background-color: #15192b; border: 1px solid #2b3044; border-radius: 6px; padding: 15px; }
     
     /* Sidebar */
     [data-testid="stSidebar"] { background-color: #050608; border-right: 1px solid #2b3044; }
+    
+    /* Tab Styling */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #15192b; border-radius: 4px; color: #fff; }
+    .stTabs [aria-selected="true"] { background-color: #00d4ff !important; color: #000 !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------------
-# 2. HEADER & ACADEMIC CREDENTIALS
+# 2. HEADER & PROJECT IDENTITY
 # --------------------------------------------------------------------------------
 st.title("Astroinformatics & Exoplanetary Habitability Pipeline")
 st.markdown("""
-    **Principal Investigator:** Aydin | **Institution Target:** University of British Columbia (UBC)
+    **Principal Investigator:** Aydin | **Target Institution:** University of British Columbia (UBC)
     
     *An automated signal processing pipeline utilizing NASA Kepler telemetry to isolate transit signals, 
     simulate real-time orbital dynamics, and estimate planetary habitability potential.*
@@ -52,9 +56,9 @@ st.markdown("""
 st.divider()
 
 # --------------------------------------------------------------------------------
-# 3. INSTRUMENTATION CONTROLS (SIDEBAR)
+# 3. MISSION CONTROL SIDEBAR
 # --------------------------------------------------------------------------------
-st.sidebar.header("🔭 Instrumentation Controls")
+st.sidebar.header("🔭 Instrument Controls")
 target_star = st.sidebar.text_input("Kepler Target ID:", value="Kepler-22")
 
 # Intelligent Caching to prevent API throttling
@@ -78,7 +82,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption("✅ **System Status:** Connected to NASA MAST")
 
 # --------------------------------------------------------------------------------
-# 4. DATA INGESTION ENGINE
+# 4. ROBUST DATA INGESTION ENGINE
 # --------------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_data(star, quarter):
@@ -87,11 +91,11 @@ def fetch_data(star, quarter):
         search = lk.search_lightcurve(str(star).strip(), author="Kepler", quarter=int(quarter))
         if len(search) == 0: return None, None, None, None
         
-        # Download to memory
+        # Download to memory (Fixes Cloud Throttling Issues)
         lc = search.download(quality_bitmask='default', download_dir=None)
         if lc is None: return None, None, None, None
         
-        # Scientific Cleaning: Sigma Clipping & Flattening
+        # Scientific Cleaning
         clean_lc = lc.remove_nans().remove_outliers(sigma=5).flatten(window_length=101)
         
         # Extract Metadata
@@ -112,7 +116,7 @@ else:
     raw_lc, clean_lc, r_star, teff_star = None, None, 1.0, 5778.0
 
 if clean_lc is None:
-    st.error(f"❌ Data Retrieval Error: Check Target ID '{target_star}'.")
+    st.error(f"❌ Data Retrieval Error: Check Target ID '{target_star}'. Try 'Kepler-22' or 'Kepler-452'.")
 else:
     # --- A. TRANSIT PHYSICS ---
     periodogram = clean_lc.to_periodogram(method="bls")
@@ -127,13 +131,23 @@ else:
     
     # --- C. HABITABILITY (Temperature) ---
     r_star_au = r_star * 0.00465
+    luminosity = (r_star**2) * ((teff_star/5778.0)**4)
+    hz_inner_au = np.sqrt(luminosity) * 0.95
+    hz_outer_au = np.sqrt(luminosity) * 1.37
+    
     eq_temp_k = teff_star * np.sqrt(r_star_au / (2 * semi_major_axis_au)) * ((1 - 0.3)**0.25)
     eq_temp_c = eq_temp_k - 273.15
 
     # Logic for Status
-    if 0 < eq_temp_c < 100: hab_status = "🟩 HABITABLE (Liquid Water)"
-    elif eq_temp_c >= 100: hab_status = "🟥 TOO HOT (Greenhouse)"
-    else: hab_status = "🟦 TOO COLD (Ice World)"
+    if hz_inner_au <= semi_major_axis_au <= hz_outer_au:
+        hab_status = "🟩 HABITABLE (Goldilocks Zone)"
+        hab_color = "#00ff00"
+    elif semi_major_axis_au < hz_inner_au:
+        hab_status = "🟥 TOO HOT (Inside HZ)"
+        hab_color = "#ff4b4b"
+    else:
+        hab_status = "🟦 TOO COLD (Outside HZ)"
+        hab_color = "#00d4ff"
 
     # --------------------------------------------------------------------------------
     # 6. RESEARCH DASHBOARD
@@ -141,7 +155,7 @@ else:
     
     # METRICS ROW
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Orbital Period", f"{best_period.value:.4f} d", "Locked Signal")
+    c1.metric("Orbital Period", f"{best_period.value:.4f} d", "Periodic Lock")
     c2.metric("Planet Radius", f"{r_planet_jup:.2f} R_Jup", f"Host: {r_star:.1f} R_Sun")
     c3.metric("Orbital Distance", f"{semi_major_axis_au:.3f} AU", "Semi-Major Axis")
     c4.metric("Surface Temp", f"{eq_temp_c:.0f} °C", hab_status)
@@ -151,75 +165,68 @@ else:
     time_delta = (folded_lc.time.value[-1] - folded_lc.time.value[0]) / len(folded_lc.time.value) if len(folded_lc.time.value) > 1 else 0.02
     binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_delta) * u.day)
 
-    col_left, col_right = st.columns([1.6, 1])
+    tabs = st.tabs(["📊 Phase-Locked Transit", "🪐 Orbital Habitable Zone", "🔭 Raw Telemetry", "💾 Data Export"])
 
-    # --- CHART 1: ANIMATED TRANSIT ---
-    with col_left:
-        st.subheader("📉 Phase-Locked Transit Analysis")
-        # Animation Frames
-        n_frames = 8
-        chunk = len(folded_lc) // n_frames
-        frames = [go.Frame(data=[go.Scatter(x=folded_lc.time.value[:(k+1)*chunk], y=folded_lc.flux.value[:(k+1)*chunk])]) for k in range(n_frames)]
+    # --- TAB 1: PHASE PLOT ---
+    with tabs[0]:
+        st.subheader("Phase-Folded Light Curve Analysis")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=folded_lc.time.value, y=folded_lc.flux.value, mode='markers', name='Raw Flux', marker=dict(color='#00d4ff', size=3, opacity=0.3)))
+        fig.add_trace(go.Scatter(x=binned_lc.time.value, y=binned_lc.flux.value, mode='lines+markers', name='Binned Signal', line=dict(color='#ffffff', width=3)))
+        fig.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_title="Orbital Phase", yaxis_title="Normalized Flux")
+        st.plotly_chart(fig, use_container_width=True)
 
-        fig_anim = go.Figure(
-            data=[
-                go.Scatter(x=folded_lc.time.value[:chunk], y=folded_lc.flux.value[:chunk], mode='markers', marker=dict(color='#00d4ff', size=3, opacity=0.4), name='Flux Data'),
-                go.Scatter(x=binned_lc.time.value, y=binned_lc.flux.value, mode='lines+markers', line=dict(color='#ffffff', width=2), marker=dict(size=5, color='#ffffff'), name='Binned Model')
-            ],
-            layout=go.Layout(
-                template="plotly_dark",
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                height=400,
-                xaxis=dict(title="Orbital Phase (Days)", showgrid=True, gridcolor='#2b3044'),
-                yaxis=dict(title="Relative Flux", showgrid=True, gridcolor='#2b3044'),
-                margin=dict(l=0, r=0, t=0, b=0),
-                updatemenus=[dict(type="buttons", showactive=False, buttons=[dict(label="▶ Simulate Scan", method="animate", args=[None, dict(frame=dict(duration=120))])])]
-            ),
-            frames=frames
-        )
-        st.plotly_chart(fig_anim, use_container_width=True)
-
-    # --- CHART 2: REAL-TIME SOLAR SYSTEM MAP ---
-    with col_right:
-        st.subheader("🪐 Real-Time Orbital Geometry")
+    # --- TAB 2: ORBITAL VISUALIZER (THE COOL FEATURE) ---
+    with tabs[1]:
+        st.subheader("Top-Down Orbital Reconstruction")
         
-        # Real-Time Position Math
-        current_time = 2454833.0 + (datetime.utcnow() - datetime(2009, 1, 1)).total_seconds() / 86400.0
-        phase = ((current_time - best_t0.value) % best_period.value) / best_period.value * 2 * np.pi
-        px, py = semi_major_axis_au * np.cos(phase), semi_major_axis_au * np.sin(phase)
-        
-        # Zones
-        lum = (teff_star/5778)**4 * (r_star)**2
-        hz_in, hz_out = 0.95 * np.sqrt(lum), 1.37 * np.sqrt(lum)
-        
-        fig_map = go.Figure()
-        
-        # Star
-        fig_map.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=30, color='#ffcc00'), name='Star'))
-        
-        # HZ Ring (Green)
+        # Create Circles for Plot
         theta = np.linspace(0, 2*np.pi, 100)
-        fig_map.add_trace(go.Scatter(x=hz_out*np.cos(theta), y=hz_out*np.sin(theta), mode='lines', line=dict(width=0), fill='toself', fillcolor='rgba(0,255,0,0.1)', name='Habitable Zone'))
-        fig_map.add_trace(go.Scatter(x=hz_in*np.cos(theta), y=hz_in*np.sin(theta), mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0,255,0,0.2)', showlegend=False))
         
-        # Orbit & Planet
-        fig_map.add_trace(go.Scatter(x=semi_major_axis_au*np.cos(theta), y=semi_major_axis_au*np.sin(theta), mode='lines', line=dict(color='#444', dash='dash'), showlegend=False))
-        fig_map.add_trace(go.Scatter(x=[px], y=[py], mode='markers', marker=dict(size=10, color='#00d4ff', line=dict(width=2, color='white')), name='Planet'))
-        
-        lim = max(hz_out, semi_major_axis_au) * 1.2
-        fig_map.update_layout(
-            template="plotly_dark",
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(range=[-lim, lim], visible=False),
-            yaxis=dict(range=[-lim, lim], visible=False, scaleanchor="x", scaleratio=1),
-            height=400, margin=dict(l=0, r=0, t=0, b=0),
-            legend=dict(orientation="h", y=0, x=0.5, xanchor="center")
-        )
-        st.plotly_chart(fig_map, use_container_width=True)
+        # HZ Inner
+        x_hz_in, y_hz_in = hz_inner_au * np.cos(theta), hz_inner_au * np.sin(theta)
+        # HZ Outer
+        x_hz_out, y_hz_out = hz_outer_au * np.cos(theta), hz_outer_au * np.sin(theta)
+        # Planet Orbit
+        x_orb, y_orb = semi_major_axis_au * np.cos(theta), semi_major_axis_au * np.sin(theta)
 
-    # --------------------------------------------------------------------------------
-    # 7. DATA EXPORT
-    # --------------------------------------------------------------------------------
-    with st.expander("📂 Export Processed Telemetry"):
-        st.dataframe(pd.DataFrame({'Time_BJD': clean_lc.time.value, 'Flux_Norm': clean_lc.flux.value}).head(100), use_container_width=True)
-        st.download_button("Download Full CSV", clean_lc.to_pandas().to_csv().encode('utf-8'), "telemetry.csv", "text/csv")
+        fig_orb = go.Figure()
+
+        # 1. Habitable Zone Band (Green)
+        fig_orb.add_trace(go.Scatter(x=x_hz_in, y=y_hz_in, mode='lines', line=dict(color='rgba(0,255,0,0.2)', width=1), showlegend=False))
+        fig_orb.add_trace(go.Scatter(x=x_hz_out, y=y_hz_out, mode='lines', line=dict(color='rgba(0,255,0,0.2)', width=1), fill='tonexty', fillcolor='rgba(0,255,0,0.1)', name='Habitable Zone'))
+
+        # 2. Planet Orbit
+        fig_orb.add_trace(go.Scatter(x=x_orb, y=y_orb, mode='lines', line=dict(color=hab_color, width=2, dash='dash'), name='Planet Orbit'))
+        
+        # 3. The Star (Center)
+        fig_orb.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(color='#ffcc00', size=20, line=dict(color='#ffaa00', width=2)), name='Host Star'))
+
+        # 4. The Planet (Fixed Position for Viz)
+        fig_orb.add_trace(go.Scatter(x=[semi_major_axis_au], y=[0], mode='markers', marker=dict(color=hab_color, size=10, line=dict(color='white', width=1)), name='Exoplanet'))
+
+        fig_orb.update_layout(
+            template="plotly_dark", 
+            height=600, 
+            width=600, 
+            xaxis=dict(scaleanchor="y", scaleratio=1, title="Distance (AU)", showgrid=False), 
+            yaxis=dict(title="Distance (AU)", showgrid=False),
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_orb, use_container_width=True)
+        st.info(f"Visualizing the Goldilocks Zone (Green Band) based on host star luminosity. Orbit is color-coded by habitability: {hab_status}")
+
+    # --- TAB 3: RAW DATA ---
+    with tabs[2]:
+        st.subheader("Raw Telemetry Stream")
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(x=clean_lc.time.value, y=clean_lc.flux.value, mode='markers', marker=dict(color='#4c5c75', size=2)))
+        fig2.update_layout(template="plotly_dark", height=400, xaxis_title="Time (BJD)", yaxis_title="Flux", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # --- TAB 4: EXPORT ---
+    with tabs[3]:
+        st.subheader("Export Processed Matrix")
+        csv = pd.DataFrame({'Phase': folded_lc.time.value, 'Flux': folded_lc.flux.value}).to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Analysis CSV", data=csv, file_name=f"{target_star}_analysis.csv", mime="text/csv")
