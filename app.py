@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import astropy.units as u
 
-# 🪐 Configure the Streamlit Page for an elite research appearance
+# Configure the Streamlit Page for an enterprise research appearance
 st.set_page_config(
     page_title="Astroinformatics Research Portal", 
     page_icon="🌌", 
@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🎨 Custom CSS injection for elite Midnight Academic styling
+# Custom CSS injection for elite Midnight Academic styling
 st.markdown("""
     <style>
     .main { background-color: #05070f; }
@@ -24,8 +24,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 🏛️ Academic-Grade Header
-st.title("🌌 Astroinformatics & Exoplanetary Transit Pipeline")
+# Academic-Grade Header
+st.title("Astroinformatics & Exoplanetary Transit Pipeline")
 st.markdown("""
     **Research Engineer:** Aydin | **Target Institution:** University of British Columbia (UBC)
     
@@ -33,9 +33,9 @@ st.markdown("""
 """)
 st.divider()
 
-# 🎛️ Mission Control Sidebar
-st.sidebar.header("🛸 Mission Control Panel")
-target_star = st.sidebar.text_input("Enter Kepler Target Star:", value="Kepler-8")
+# Mission Control Sidebar
+st.sidebar.header("Control Panel")
+target_star = st.sidebar.text_input("Kepler Target Star:", value="Kepler-8")
 
 # Initialize session state for storing quarters to prevent redundant API queries
 if "last_star" not in st.session_state or st.session_state.last_star != target_star:
@@ -62,9 +62,9 @@ else:
 bin_size = st.sidebar.slider("Phase Binning Vector Size:", min_value=5, max_value=100, value=25, step=5)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 Calculated Physical Properties")
+st.sidebar.markdown("### Calculated Physical Properties")
 
-# 📡 High-Compatibility NASA Data Fetching & Signal Cleaning Engine
+# High-Compatibility NASA Data Fetching & Signal Cleaning Engine
 @st.cache_data(show_spinner="Streaming Live Telemetry from NASA MAST...", ttl=3600)
 def fetch_stellar_data(star, quarter):
     if quarter is None:
@@ -95,23 +95,23 @@ def fetch_stellar_data(star, quarter):
     except Exception:
         return None, None, None
 
-# 🧠 Execute Pipeline
+# Execute Pipeline
 if selected_quarter:
     raw_lc, clean_lc, r_star = fetch_stellar_data(target_star, selected_quarter)
 else:
     raw_lc, clean_lc, r_star = None, None, None
 
 if clean_lc is None:
-    st.error(f"❌ Pipeline Failure: Unable to fetch archival records for '{target_star}'. Verify object syntax (e.g., 'Kepler-10', 'Kepler-8').")
+    st.error(f"Pipeline Failure: Unable to fetch archival records for '{target_star}'. Verify object syntax (e.g., 'Kepler-10', 'Kepler-8').")
 else:
-    # 🧩 Periodogram Frequency Analysis via Box Least Squares (BLS)
+    # Periodogram Frequency Analysis via Box Least Squares (BLS)
     with st.spinner("Executing Box Least Squares (BLS) Period Search..."):
         periodogram = clean_lc.to_periodogram(method="bls")
         best_period = periodogram.period_at_max_power
         best_t0 = periodogram.transit_time_at_max_power
         transit_depth = periodogram.depth_at_max_power.value
 
-    # 📐 Physical Boundary Math
+    # Physical Boundary Math
     r_ratio = np.sqrt(transit_depth)
     actual_radius_jup = r_ratio * r_star * 9.731 
 
@@ -120,18 +120,18 @@ else:
     st.sidebar.metric(label=r"Stellar Flux Dimming ($\Delta F$)", value=f"{transit_depth*100:.4f}%")
     st.sidebar.metric(label=r"Calculated Physical Radius ($R_p$)", value=f"~{actual_radius_jup:.2f} x R_Jup", delta=f"Host Star: {r_star:.2f} R_Sun")
 
-    # 🎚️ Data Dimensionality Folding & Safe Astropy Binning 
+    # Data Dimensionality Folding & Safe Astropy Binning 
     folded_lc = clean_lc.fold(period=best_period, epoch_time=best_t0)
     
     # Safely isolate time vector gaps using explicit array delta evaluation
     time_delta = (folded_lc.time.value[-1] - folded_lc.time.value[0]) / len(folded_lc.time.value) if len(folded_lc.time.value) > 1 else 0.02
     binned_lc = folded_lc.bin(time_bin_size=(bin_size * time_delta) * u.day)
 
-    # 📊 Scientific Interactive Visualizations (Plotly Engine Layout)
-    tabs = st.tabs(["📡 Full Continuous Timeline", "🎯 Phase-Folded Transit Profile", "💾 Export Subsystem"])
+    # Scientific Interactive Visualizations (Plotly Engine Layout)
+    tabs = st.tabs(["Full Continuous Timeline", "Phase-Folded Transit Profile", "Export Subsystem"])
 
     with tabs[0]:
-        st.subheader("🛰️ Continuous Telemetry Time-Series")
+        st.subheader("Continuous Telemetry Time-Series")
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(
             x=clean_lc.time.value,
@@ -153,7 +153,7 @@ else:
         st.caption("Raw time-series data capturing continuous stellar observations over a full mission quarter.")
 
     with tabs[1]:
-        st.subheader("🎯 Phase-Folded Exoplanetary Silhouette")
+        st.subheader("Phase-Folded Exoplanetary Silhouette")
         fig2 = go.Figure()
         
         # Raw folded data
@@ -188,7 +188,7 @@ else:
         st.caption("Phase folding maps hundreds of distinct observations into a unified orbital footprint to clarify the signal-to-noise ratio.")
 
     with tabs[2]:
-        st.subheader("💾 Research Data Export Architecture")
+        st.subheader("Research Data Export Architecture")
         
         # Generate DataFrame safe for ingestion into data analytics pipelines
         export_df = pd.DataFrame({
@@ -200,7 +200,7 @@ else:
         
         st.info("Admissions review option: Download the processed lightcurve matrix directly as a structured CSV for validation in NumPy/Pandas pipelines.")
         st.download_button(
-            label="📥 Download Phase-Folded Matrix (CSV)",
+            label="Download Phase-Folded Matrix (CSV)",
             data=csv_data,
             file_name=f"{target_star}_folded_telemetry.csv",
             mime="text/csv",
