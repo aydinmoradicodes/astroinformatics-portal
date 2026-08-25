@@ -39,7 +39,7 @@ st.markdown("""
     **Principal Investigator:** Aydin Moradi | **Target Institution:** University of British Columbia (UBC)
     
     *An automated signal processing pipeline utilizing NASA Kepler telemetry to isolate transit signals, 
-    simulate real-time orbital dynamics, and estimate planetary habitability potential.*
+    simulate real-time orbital dynamics, and estimate planetary habitability potential 🪐.*
 """)
 st.divider()
 
