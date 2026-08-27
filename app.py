@@ -1,214 +1,212 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 import plotly.graph_objects as go
-from skyfield.api import load, wgs84, EarthSatellite
-from datetime import datetime, timedelta, timezone
 
-# --- 1. CONFIGURATION & CAS THEME ---
-st.set_page_config(layout="wide", page_title="OrbitGuard | CAS Core", page_icon="🛰️")
+# --- CONFIGURATION ---
+st.set_page_config(layout="wide", page_title="ExoHunter | Deep Space Analysis", page_icon="🔭")
 
-# Force "Mission Control" visual style
+# Custom "Deep Space" CSS
 st.markdown("""
 <style>
-    .stApp { background-color: #000000; color: #00ff41; }
-    
-    /* Input Fields */
-    .stNumberInput input { background-color: #111; color: #00ff41; border: 1px solid #333; }
-    
-    /* Metrics */
-    div.stMetric {
-        background-color: #050505;
-        border: 1px solid #1f2937;
-        padding: 15px;
-        border-radius: 4px;
-        box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
-    }
-    
-    /* Typography */
-    h1, h2, h3 { color: #e5e7eb; font-family: 'Courier New', monospace; letter-spacing: -1px; }
-    p, label { font-family: 'Courier New', monospace; }
+    .stApp { background-color: #000000; color: #e0e0e0; }
+    h1, h2, h3 { color: #00e5ff; font-family: 'Helvetica Neue', sans-serif; font-weight: 300; }
+    .metric-card { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    .highlight { color: #00e5ff; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. PHYSICS ENGINE (THE BACKEND) ---
-@st.cache_resource
-def get_ephemeris():
-    # Load physical constants
-    url = 'https://celestrak.org/NORAD/elements/stations.txt'
+# --- BACKEND: DATA & PHYSICS ENGINE ---
+
+@st.cache_data
+def load_data():
+    """
+    Fetches the NASA Exoplanet Archive.
+    Includes a 'Fail-Safe' backup dataset to ensure 100% uptime for demos.
+    """
+    # 1. LIVE DATA: Try to fetch from Caltech/NASA
+    nasa_url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+pl_name,pl_rade,pl_masse,pl_eqt,sy_dist,st_teff,st_rad,disc_year+from+pscomppars+where+pl_rade+is+not+null+and+pl_masse+is+not+null&format=csv"
+    
     try:
-        sats = load.tle_file(url)
-        return {s.name: s for s in sats}, "LINK ESTABLISHED"
+        df = pd.read_csv(nasa_url)
+        # Rename columns for readability
+        df = df.rename(columns={
+            'pl_name': 'Name',
+            'pl_rade': 'Radius (Earth)',
+            'pl_masse': 'Mass (Earth)',
+            'pl_eqt': 'Temp (K)',
+            'sy_dist': 'Distance (pc)',
+            'st_teff': 'Star Temp (K)',
+            'disc_year': 'Discovery Year'
+        })
+        return df, "🟢 NASA LIVE FEED"
     except:
-        # Emergency Fallback TLE
-        ts = load.timescale()
-        line1 = "1 25544U 98067A   24143.42848900  .00014603  00000+0  26343-3 0  9997"
-        line2 = "2 25544  51.6398 108.6657 0004149 105.1328 344.2093 15.50346123455086"
-        iss = EarthSatellite(line1, line2, 'ISS (ZARYA)', ts)
-        return {'ISS (ZARYA)': iss}, "OFFLINE MODE"
+        # 2. BACKUP DATA: If NASA API fails, use this hardcoded 'Greatest Hits' list
+        # This guarantees the app NEVER shows an error screen.
+        data = {
+            'Name': ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-442 b', 'Teegarden b', 'K2-18 b', 'Ross 128 b'],
+            'Radius (Earth)': [1.03, 0.91, 1.34, 1.02, 2.37, 1.35],
+            'Mass (Earth)': [1.07, 0.77, 2.30, 1.05, 8.92, 1.40],
+            'Temp (K)': [234, 251, 233, 260, 265, 280],
+            'Distance (pc)': [1.3, 12.1, 342.0, 3.8, 38.0, 3.37],
+            'Star Temp (K)': [3042, 2566, 4402, 2900, 3500, 3192],
+            'Discovery Year': [2016, 2017, 2015, 2019, 2015, 2017]
+        }
+        return pd.DataFrame(data), "jg-orange[OFFLINE MODE]"
 
-def solve_hohmann_transfer(r1, r2):
+def calculate_esi(df):
     """
-    CAS FUNCTION: Solves the Vis-Viva Equation for orbital transfer.
-    Returns the Delta-V (Fuel) required and the Transfer Orbit geometry.
+    The 'UBC Physics' Flex:
+    Calculates the Earth Similarity Index (ESI) using Schulze-Makuch's formula.
+    ESI = 1.0 is Earth. 0.8+ is 'Earth-Like'.
     """
-    mu = 398600  # Earth Gravitational Parameter (km^3/s^2)
+    # Earth Reference Values
+    r_earth = 1.0
+    rho_earth = 1.0 # Density (normalized)
+    v_esc_earth = 1.0 # Escape Velocity (normalized)
+    t_earth = 288.0 # Surface Temp (Kelvin)
+
+    # Weights for the formula (Temperature is most critical)
+    w_r = 0.57
+    w_rho = 1.07
+    w_v = 0.70
+    w_t = 5.58
     
-    # Physics: Velocities
-    v1 = np.sqrt(mu / r1) # Initial Velocity
-    v2 = np.sqrt(mu / r2) # Final Velocity
+    # 1. Estimate Density (ρ) if Mass & Radius are known
+    # ρ ~ Mass / Radius^3
+    df['Density'] = df['Mass (Earth)'] / (df['Radius (Earth)'] ** 3)
     
-    # Transfer Ellipse
-    a_transfer = (r1 + r2) / 2
-    v_perigee = np.sqrt(mu * (2/r1 - 1/a_transfer))
-    v_apogee = np.sqrt(mu * (2/r2 - 1/a_transfer))
+    # 2. Estimate Escape Velocity (v)
+    # v ~ sqrt(Mass / Radius)
+    df['Esc Vel'] = np.sqrt(df['Mass (Earth)'] / df['Radius (Earth)'])
     
-    # The "Burns" (Delta V)
-    dv1 = abs(v_perigee - v1)
-    dv2 = abs(v2 - v_apogee)
-    total_dv = dv1 + dv2
+    # 3. The ESI Formula
+    # We compare Radius, Density, Esc Vel, and Temperature to Earth
+    df['ESI_Radius'] = (1 - np.abs((df['Radius (Earth)'] - r_earth) / (df['Radius (Earth)'] + r_earth))) ** w_r
+    df['ESI_Density'] = (1 - np.abs((df['Density'] - rho_earth) / (df['Density'] + rho_earth))) ** w_rho
+    df['ESI_EscVel'] = (1 - np.abs((df['Esc Vel'] - v_esc_earth) / (df['Esc Vel'] + v_esc_earth))) ** w_v
+    df['ESI_Temp'] = (1 - np.abs((df['Temp (K)'] - t_earth) / (df['Temp (K)'] + t_earth))) ** w_t
     
-    return total_dv, dv1, dv2
+    # Geometric Mean of the components
+    df['ESI'] = (df['ESI_Radius'] * df['ESI_Density'] * df['ESI_EscVel'] * df['ESI_Temp']) ** (1/4)
+    
+    return df
 
-# --- 3. THE UI LAYER ---
+# --- FRONTEND: THE DASHBOARD ---
 
-# Sidebar: Controls
-st.sidebar.title("ACCESS TERMINAL")
-sat_data, status = get_ephemeris()
-target_name = st.sidebar.selectbox("Active Asset", ["ISS (ZARYA)", "HST", "TIANGONG"])
-mode = st.sidebar.radio("Operation Mode", ["Live Telemetry", "Flight Computer (CAS)"])
+# 1. Load & Process Data
+raw_df, status = load_data()
+df = calculate_esi(raw_df.dropna()) # Remove incomplete data rows
 
-ts = load.timescale()
-# CRITICAL FIX: Use timezone-aware datetime to prevent crash
-t_now = ts.from_datetime(datetime.now(timezone.utc))
+# Sidebar: Research Controls
+st.sidebar.title("🔍 OBSERVATORY CONTROLS")
+st.sidebar.markdown(f"**DATA SOURCE:** {status}")
 
-sat = sat_data.get(target_name, sat_data['ISS (ZARYA)'])
+# Filters
+st.sidebar.subheader("Habitability Filters")
+min_esi = st.sidebar.slider("Minimum ESI (Earth Similarity)", 0.0, 1.0, 0.7, 0.05)
+max_temp = st.sidebar.slider("Max Equilibrium Temp (K)", 200, 500, 350)
+max_dist = st.sidebar.slider("Max Distance (Parsecs)", 0, 1000, 100)
 
-# Header
-c1, c2 = st.columns([3, 1])
+# Apply Filters
+filtered_df = df[
+    (df['ESI'] >= min_esi) & 
+    (df['Temp (K)'] <= max_temp) & 
+    (df['Distance (pc)'] <= max_dist)
+]
+
+# MAIN PANEL
+c1, c2 = st.columns([2, 1])
 with c1:
-    st.title(f"// {target_name}")
-    st.caption("ORBITGUARD DEFENSE GRID v4.0")
+    st.title("EXO-HUNTER")
+    st.caption("Computational Astrobiology & Candidate Selection Tool")
 with c2:
-    st.metric("CONN_STATUS", status)
+    st.metric("CANDIDATES FOUND", len(filtered_df), f"Total Database: {len(df)}")
 
-if mode == "Live Telemetry":
-    # --- LIVE MODE (Tracking) ---
-    
-    # Physics: Calculate Position
-    geocentric = sat.at(t_now)
-    subpoint = wgs84.subpoint(geocentric)
-    
-    # Visualization: 3D Globe
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("ORBITAL STATE VECTOR")
-        
-        # Generate Ground Track (Future Path)
-        minutes = np.arange(0, 90, 1)
-        times = ts.from_datetime(datetime.now(timezone.utc) + timedelta(minutes=1) * minutes[:, None])
-        # Flatten the times array for Skyfield
-        times_flat = times.flatten()
-        
-        path_geo = sat.at(times_flat)
-        path_sub = wgs84.subpoint(path_geo)
-        
-        fig = go.Figure()
-        
-        # 1. Earth
-        fig.add_trace(go.Scattergeo(
-            lon=path_sub.longitude.degrees, lat=path_sub.latitude.degrees,
-            mode='lines', line=dict(width=2, color='#00ff41'),
-            name='Projected Path'
-        ))
-        
-        # 2. Satellite
-        fig.add_trace(go.Scattergeo(
-            lon=[subpoint.longitude.degrees], lat=[subpoint.latitude.degrees],
-            mode='markers', marker=dict(size=12, color='white', symbol='diamond'),
-            name=target_name
-        ))
-        
-        fig.update_geos(
-            projection_type="orthographic",
-            showland=True, landcolor="#111", oceancolor="#000",
-            showcountries=False, showlakes=False
-        )
-        fig.update_layout(
-            margin={"r":0,"t":0,"l":0,"b":0},
-            paper_bgcolor="#00000000",
-            height=450
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# VISUALIZATION 1: The "Goldilocks Zone" Scatter
+st.subheader("The Goldilocks Zone Analysis")
+fig_scatter = px.scatter(
+    filtered_df,
+    x="Temp (K)",
+    y="Radius (Earth)",
+    color="ESI",
+    size="Mass (Earth)",
+    hover_name="Name",
+    color_continuous_scale="Viridis",
+    range_x=[400, 150], # Inverted X axis (Hot left, Cold right)
+    range_y=[0.5, 3.0],
+    title="Planetary Radius vs. Equilibrium Temperature"
+)
+# Add a rectangle for the "Habitable Zone"
+fig_scatter.add_shape(type="rect",
+    x0=200, y0=0.8, x1=320, y1=1.5,
+    line=dict(color="Green", width=2),
+    fillcolor="rgba(0,255,0,0.1)",
+)
+fig_scatter.update_layout(plot_bgcolor="#0e1117", paper_bgcolor="#0e1117", font_color="white")
+st.plotly_chart(fig_scatter, use_container_width=True)
 
-    with col2:
-        st.subheader("TELEMETRY")
-        st.metric("ALTITUDE", f"{subpoint.elevation.km:.2f} km")
-        st.metric("LATITUDE", f"{subpoint.latitude.degrees:.4f}°")
-        st.metric("LONGITUDE", f"{subpoint.longitude.degrees:.4f}°")
-        st.info("System calculating orbital perturbations via SGP4 propagation model.")
+# VISUALIZATION 2: 3D Galaxy Map
+st.subheader("3D Galactic Neighborhood")
+col_map, col_details = st.columns([2, 1])
 
-elif mode == "Flight Computer (CAS)":
-    # --- CAS MODE (Problem Solving) ---
-    st.markdown("### 🚀 HOHMANN TRANSFER SOLVER")
-    st.markdown("Calculate the fuel required to move this satellite to a new orbit.")
+with col_map:
+    # 3D Plot of where these planets are relative to Earth
+    # (Simplified: Using Distance/Random Angle as we lack full RA/DEC in this simple CSV view)
+    theta = np.random.uniform(0, 2*np.pi, len(filtered_df))
+    phi = np.random.uniform(0, np.pi, len(filtered_df))
+    x = filtered_df['Distance (pc)'] * np.sin(phi) * np.cos(theta)
+    y = filtered_df['Distance (pc)'] * np.sin(phi) * np.sin(theta)
+    z = filtered_df['Distance (pc)'] * np.cos(phi)
     
-    # Inputs
-    col_in1, col_in2 = st.columns(2)
-    with col_in1:
-        current_r = 6378 + 420 # Approx LEO
-        st.metric("CURRENT ORBIT RADIUS (r1)", f"{current_r} km")
-    with col_in2:
-        target_alt = st.number_input("TARGET ALTITUDE (km)", value=35786) # Geo Sync
-        target_r = 6378 + target_alt
+    fig_3d = go.Figure(data=[go.Scatter3d(
+        x=x, y=y, z=z,
+        mode='markers',
+        marker=dict(
+            size=5,
+            color=filtered_df['ESI'],
+            colorscale='Viridis',
+            opacity=0.8
+        ),
+        text=filtered_df['Name'],
+        hoverinfo='text'
+    )])
     
-    # The CAS Logic (Math)
-    total_dv, burn1, burn2 = solve_hohmann_transfer(current_r, target_r)
+    fig_3d.add_trace(go.Scatter3d(
+        x=[0], y=[0], z=[0],
+        mode='markers',
+        marker=dict(size=10, color='red'),
+        name='Earth'
+    ))
     
-    # Visualization: The Transfer Orbit
-    theta = np.linspace(0, 2*np.pi, 100)
-    
-    # Circle 1 (Start)
-    x1 = current_r * np.cos(theta)
-    y1 = current_r * np.sin(theta)
-    
-    # Circle 2 (Target)
-    x2 = target_r * np.cos(theta)
-    y2 = target_r * np.sin(theta)
-    
-    # Ellipse (Transfer)
-    a = (current_r + target_r) / 2 # Semi-major axis
-    # Shift ellipse so focus is at (0,0) - Earth Center
-    c = a - current_r 
-    # Parametric ellipse equations
-    b = np.sqrt(a**2 - c**2) # Semi-minor axis (approx for viz)
-    
-    # Plotting the "Solution"
-    fig_orbit = go.Figure()
-    
-    # Earth (Center)
-    fig_orbit.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=20, color='blue'), name='Earth'))
-    
-    # Orbits
-    fig_orbit.add_trace(go.Scatter(x=x1, y=y1, mode='lines', line=dict(color='green', dash='dash'), name='Initial Orbit'))
-    fig_orbit.add_trace(go.Scatter(x=x2, y=y2, mode='lines', line=dict(color='red', dash='dash'), name='Target Orbit'))
-    
-    fig_orbit.update_layout(
-        plot_bgcolor="#000", paper_bgcolor="#000",
-        xaxis=dict(showgrid=False, visible=False), 
-        yaxis=dict(showgrid=False, visible=False, scaleanchor="x", scaleratio=1),
-        margin=dict(l=20, r=20, t=20, b=20),
+    fig_3d.update_layout(
+        scene = dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+            bgcolor='#000000'
+        ),
+        margin=dict(r=0, l=0, b=0, t=0),
+        paper_bgcolor="#000000",
         height=400
     )
-    
-    # Results Dashboard
-    r1, r2 = st.columns([2, 1])
-    with r1:
-        st.plotly_chart(fig_orbit, use_container_width=True)
-    with r2:
-        st.success(f"TOTAL DELTA-V: {total_dv:.3f} km/s")
-        st.write("---")
-        st.write(f"**BURN 1 (Injection):** {burn1:.3f} km/s")
-        st.write(f"**BURN 2 (Circularize):** {burn2:.3f} km/s")
-        st.caption("Calculated using Vis-Viva Equation")
+    st.plotly_chart(fig_3d, use_container_width=True)
+
+with col_details:
+    st.markdown("### TOP CANDIDATE")
+    if not filtered_df.empty:
+        best_planet = filtered_df.loc[filtered_df['ESI'].idxmax()]
+        st.info(f"**NAME:** {best_planet['Name']}")
+        st.write(f"**ESI SCORE:** {best_planet['ESI']:.3f}")
+        st.write(f"**RADIUS:** {best_planet['Radius (Earth)']:.2f} x Earth")
+        st.write(f"**TEMP:** {best_planet['Temp (K)']:.0f} K")
+        st.write(f"**DIST:** {best_planet['Distance (pc)']:.1f} pc")
+        
+        # Determine Verdict
+        if best_planet['ESI'] > 0.85:
+            st.success("VERDICT: High Probability of Habitability")
+        else:
+            st.warning("VERDICT: Potential Extremophile Environment")
+    else:
+        st.error("No planets match current filters.")
