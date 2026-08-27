@@ -2,5 +2,5 @@ streamlit
 plotly
 skyfield
 pandas
-pytz
 numpy
+pytz
