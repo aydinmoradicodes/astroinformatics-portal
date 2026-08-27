@@ -1,7 +1,4 @@
 streamlit
-lightkurve
-astropy
-numpy
-pandas
 plotly
-scipy
+skyfield
+pandas
