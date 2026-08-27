@@ -1,142 +1,152 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
 from skyfield.api import load, wgs84
-from datetime import datetime
+from skyfield.framelib import itrs
+from datetime import datetime, timedelta
+import pytz
 
-# --- CONFIGURATION & PAGE SETUP ---
-st.set_page_config(layout="wide", page_title="OrbitGuard | SSA Telemetry")
+# --- CONFIGURATION & STYLE ---
+st.set_page_config(layout="wide", page_title="OrbitGuard Pro | Command")
 
-# Custom CSS for the "Mission Control" aesthetic
+# Custom "Cyberpunk/NASA" CSS
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; }
-    .metric-card {
-        background-color: #1f2937;
-        border: 1px solid #374151;
-        border-radius: 8px;
-        padding: 15px;
-        color: #00ff41;
-        font-family: 'Courier New', monospace;
+    .stApp { background-color: #050505; }
+    div.stMetric {
+        background-color: #111;
+        border: 1px solid #333;
+        padding: 10px;
+        border-radius: 5px;
+        border-left: 5px solid #00ff41;
     }
-    h1, h2, h3 { color: #e5e7eb; }
+    h1, h2, h3 { color: #e0e0e0; font-family: 'Courier New', monospace; }
+    .status-good { color: #00ff41; font-weight: bold; }
+    .status-warn { color: #ffa500; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- THE HEAVY LIFTING: BACKEND PHYSICS ---
+# --- BACKEND: PHYSICS ENGINE ---
 @st.cache_resource
-def load_satellite_data():
-    """
-    Fetches real-time TLE (Two-Line Element) data from CelesTrak.
-    This demonstrates 'Cloud API Integration' to UBC.
-    """
+def load_data():
+    # Load TLE data and Ephemeris for accurate gravity/shadow calculations
     stations_url = 'http://celestrak.org/NORAD/elements/stations.txt'
-    starlink_url = 'http://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle'
-    
-    # Load the data (Cached so it doesn't crash the server)
     satellites = load.tle_file(stations_url)
-    # limit Starlink to 50 for performance demo
-    starlink = load.tle_file(starlink_url)[:50] 
-    
-    return {
-        'ISS': satellites['ISS (ZARYA)'],
-        'HST': satellites['HST'], # Hubble
-        'Starlink': starlink
-    }
+    eph = load('de421.bsp') # NASA JPL Ephemeris for Sun/Earth positions
+    return {sat.name: sat for sat in satellites}, eph
 
-def get_telemetry(sat_object):
-    """
-    Calculates the exact position using the WGS84 Earth Model.
-    This demonstrates 'Orbital Mechanics' knowledge.
-    """
+def calculate_ground_track(sat, t_now, duration_minutes=90):
+    """Generates the future path (Sine Wave) for visualization"""
     ts = load.timescale()
-    t = ts.now()
-    geocentric = sat_object.at(t)
-    subpoint = wgs84.subpoint(geocentric)
+    # Create a time range: -45 mins to +45 mins
+    minutes = np.arange(-45, 45, 1) 
+    times = ts.utc(t_now.utc_datetime().year, t_now.utc_datetime().month, t_now.utc_datetime().day, 
+                   t_now.utc_datetime().hour, t_now.utc_datetime().minute + minutes)
     
-    return {
-        "lat": subpoint.latitude.degrees,
-        "lon": subpoint.longitude.degrees,
-        "alt": subpoint.elevation.km,
-        "speed": 7.66 # Avg speed in km/s (simplified for speed)
-    }
+    # Calculate positions for all times at once (Vectorization)
+    geocentric = sat.at(times)
+    subpoints = wgs84.subpoint(geocentric)
+    
+    return pd.DataFrame({
+        'lat': subpoints.latitude.degrees,
+        'lon': subpoints.longitude.degrees,
+        'time': minutes
+    })
 
-# --- THE FRONTEND: USER INTERFACE ---
+def get_next_pass(sat, city_lat, city_lon):
+    """Predicts the next flyover for a specific location"""
+    ts = load.timescale()
+    t0 = ts.now()
+    t1 = ts.from_datetime(datetime.utcnow().replace(tzinfo=pytz.utc) + timedelta(days=1))
+    
+    city = wgs84.latlon(city_lat, city_lon)
+    t, events = sat.find_events(city, t0, t1, altitude_degrees=10.0)
+    
+    if len(t) > 0:
+        # Return the first "Rise" event
+        rise_time = t[0].utc_datetime().astimezone(pytz.timezone('US/Pacific'))
+        return rise_time.strftime('%Y-%m-%d %I:%M %p')
+    return "No pass in 24h"
 
-# 1. Header
+# --- APP LOGIC ---
+data_dict, eph = load_data()
+ts = load.timescale()
+t_now = ts.now()
+
+# Sidebar Control
+st.sidebar.title("📡 Tracking Target")
+selected_sat_name = st.sidebar.selectbox("Select Asset", ["ISS (ZARYA)", "TIANGONG", "HST"])
+sat = data_dict[selected_sat_name]
+
+# 1. Real-Time Telemetry
+geocentric = sat.at(t_now)
+subpoint = wgs84.subpoint(geocentric)
+is_sunlit = sat.at(t_now).is_sunlit(eph) # The Astrophysics Flex: Shadow detection
+
+# 2. Layout
 col1, col2 = st.columns([3, 1])
+
 with col1:
-    st.title("🛰️ OrbitGuard Defense Grid")
-    st.caption("Live Space Situational Awareness (SSA) System")
-with col2:
-    st.markdown(f"**STATUS:** ONLINE <br> **UTC:** {datetime.utcnow().strftime('%H:%M:%S')}", unsafe_allow_html=True)
+    st.title(f"TRACKING: {selected_sat_name}")
+    
+    # 3D Globe with Ground Track
+    track_df = calculate_ground_track(sat, t_now)
+    
+    fig = go.Figure()
+    
+    # The Path (Sine Wave)
+    fig.add_trace(go.Scattergeo(
+        lon=track_df['lon'], lat=track_df['lat'],
+        mode='lines', line=dict(width=2, color='#00ff41'),
+        name='Orbit Path (±45m)'
+    ))
+    
+    # The Satellite (Current Position)
+    fig.add_trace(go.Scattergeo(
+        lon=[subpoint.longitude.degrees], lat=[subpoint.latitude.degrees],
+        mode='markers', marker=dict(size=15, color='red', symbol='cross'),
+        name='Current Pos'
+    ))
 
-# 2. Data Fetching
-data = load_satellite_data()
-iss_data = get_telemetry(data['ISS'])
+    # Vancouver Marker (Home Base)
+    fig.add_trace(go.Scattergeo(
+        lon=[-123.1207], lat=[49.2827],
+        mode='markers+text', marker=dict(size=8, color='cyan'),
+        text=["UBC / Vancouver"], textposition="bottom center",
+        name='Ground Station'
+    ))
 
-# 3. The Dashboard Layout
-# Row A: Key Metrics (The "Heads Up Display")
-m1, m2, m3, m4 = st.columns(4)
-with m1:
-    st.metric("Target", "ISS (ZARYA)", delta="Active")
-with m2:
-    st.metric("Altitude", f"{iss_data['alt']:.2f} km", delta="-0.1 km")
-with m3:
-    st.metric("Latitude", f"{iss_data['lat']:.4f}°", delta="Ascending")
-with m4:
-    st.metric("Velocity", f"{iss_data['speed']} km/s", "Stable")
-
-# Row B: The 3D Earth Map
-st.subheader("Global Object Tracking")
-
-# Create the map dataframes
-df_iss = pd.DataFrame([iss_data])
-df_starlink = pd.DataFrame([get_telemetry(s) for s in data['Starlink']])
-
-# Plotting with Plotly (Industry Standard for Data Science)
-fig = px.scatter_geo(
-    df_starlink,
-    lat='lat',
-    lon='lon',
-    hover_name="lat",
-    title=None,
-    projection="orthographic" # This makes it look like a 3D Globe
-)
-
-# Add ISS as a distinct Red Marker
-fig.add_trace(go.Scattergeo(
-    lon=[iss_data['lon']],
-    lat=[iss_data['lat']],
-    mode='markers',
-    marker=dict(size=15, color='red', symbol='diamond'),
-    name='ISS'
-))
-
-# Style the map to look like "Dark Mode"
-fig.update_layout(
-    margin={"r":0,"t":0,"l":0,"b":0},
-    paper_bgcolor="#0e1117",
-    geo=dict(
-        bgcolor="#0e1117",
-        lakecolor="#0e1117",
-        landcolor="#1f2937",
-        showocean=True,
-        oceancolor="#111827"
+    fig.update_geos(
+        projection_type="orthographic",
+        showland=True, landcolor="#1f2937",
+        showocean=True, oceancolor="#0b0f19",
+        showcountries=True, countrycolor="#374151"
     )
-)
+    fig.update_layout(
+        height=500, margin={"r":0,"t":0,"l":0,"b":0},
+        paper_bgcolor="#00000000",
+        font=dict(color="white")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
-st.plotly_chart(fig, use_container_width=True)
-
-# Row C: The Debris Risk Analysis (The "Physics" Flex)
-st.subheader("Collision Risk Assessment")
-risk_col, explain_col = st.columns(2)
-
-with risk_col:
-    st.warning("⚠️ PROXIMITY ALERT: Starlink-3122 passing within 40km of Debris Fragment [Norad ID 8821]")
-
-with explain_col:
-    st.info("System calculating conjunction probability using Keplerian Elements. TLE Epoch: 24201.55")
+with col2:
+    st.subheader("Telemetry Data")
+    
+    # Solar Status (Physics Calculation)
+    status_color = "🟢 Sunlit" if is_sunlit else "Ez Eclipse (Shadow)"
+    st.metric("Solar Status", status_color)
+    
+    # Position
+    st.metric("Altitude", f"{subpoint.elevation.km:.1f} km")
+    st.metric("Velocity", "7.66 km/s") # Approx LEO speed
+    
+    # Predictive Analytics
+    st.markdown("---")
+    st.subheader("Prediction Model")
+    next_pass = get_next_pass(sat, 49.2827, -123.1207) # Vancouver Coords
+    st.metric("Next Vancouver Pass", next_pass, help="Calculated using SGP4 Propagator")
+    
+    st.info("System: OrbitGuard v2.1\nData Source: CelesTrak / NORAD")
 
