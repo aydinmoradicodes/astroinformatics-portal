@@ -3,192 +3,212 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from skyfield.api import load, wgs84, EarthSatellite
-from datetime import datetime, timedelta
-import math
+from datetime import datetime, timedelta, timezone
 
-# --- CONFIGURATION & CYBERPUNK THEME ---
-st.set_page_config(layout="wide", page_title="OrbitGuard | Command", page_icon="🔭")
+# --- 1. CONFIGURATION & CAS THEME ---
+st.set_page_config(layout="wide", page_title="OrbitGuard | CAS Core", page_icon="🛰️")
 
+# Force "Mission Control" visual style
 st.markdown("""
 <style>
-    /* FORCE DARK MODE & TERMINAL FONT */
-    .stApp { background-color: #000508; color: #00ff41; }
+    .stApp { background-color: #000000; color: #00ff41; }
     
-    /* CUSTOM METRIC BOXES */
+    /* Input Fields */
+    .stNumberInput input { background-color: #111; color: #00ff41; border: 1px solid #333; }
+    
+    /* Metrics */
     div.stMetric {
-        background-color: #0b0f19;
+        background-color: #050505;
         border: 1px solid #1f2937;
         padding: 15px;
         border-radius: 4px;
-        box-shadow: 0 0 10px rgba(0, 255, 65, 0.1);
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
     }
-    label { color: #00ff41 !important; font-family: 'Courier New'; }
-    .stSlider > div > div > div > div { background-color: #00ff41; }
-    h1, h2, h3 { color: #e5e7eb; font-family: 'Courier New', monospace; letter-spacing: -1px; }
     
-    /* RADAR GLOW */
-    .js-plotly-plot { filter: drop-shadow(0px 0px 5px rgba(0,255,65,0.3)); }
+    /* Typography */
+    h1, h2, h3 { color: #e5e7eb; font-family: 'Courier New', monospace; letter-spacing: -1px; }
+    p, label { font-family: 'Courier New', monospace; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- BACKEND: PHYSICS ENGINE ---
+# --- 2. PHYSICS ENGINE (THE BACKEND) ---
 @st.cache_resource
-def load_satellites():
-    # Cache the data so sliding the time bar is instant
-    ts = load.timescale()
+def get_ephemeris():
+    # Load physical constants
     url = 'https://celestrak.org/NORAD/elements/stations.txt'
     try:
         sats = load.tle_file(url)
-        return {s.name: s for s in sats}, "LIVE FEED"
+        return {s.name: s for s in sats}, "LINK ESTABLISHED"
     except:
-        # Failover TLE (ISS)
+        # Emergency Fallback TLE
+        ts = load.timescale()
         line1 = "1 25544U 98067A   24143.42848900  .00014603  00000+0  26343-3 0  9997"
         line2 = "2 25544  51.6398 108.6657 0004149 105.1328 344.2093 15.50346123455086"
         iss = EarthSatellite(line1, line2, 'ISS (ZARYA)', ts)
-        return {'ISS (ZARYA)': iss}, "BACKUP FEED"
+        return {'ISS (ZARYA)': iss}, "OFFLINE MODE"
 
-# --- SIDEBAR: MISSION CONTROLS ---
-st.sidebar.header("🕹️ MISSION CONTROLS")
+def solve_hohmann_transfer(r1, r2):
+    """
+    CAS FUNCTION: Solves the Vis-Viva Equation for orbital transfer.
+    Returns the Delta-V (Fuel) required and the Transfer Orbit geometry.
+    """
+    mu = 398600  # Earth Gravitational Parameter (km^3/s^2)
+    
+    # Physics: Velocities
+    v1 = np.sqrt(mu / r1) # Initial Velocity
+    v2 = np.sqrt(mu / r2) # Final Velocity
+    
+    # Transfer Ellipse
+    a_transfer = (r1 + r2) / 2
+    v_perigee = np.sqrt(mu * (2/r1 - 1/a_transfer))
+    v_apogee = np.sqrt(mu * (2/r2 - 1/a_transfer))
+    
+    # The "Burns" (Delta V)
+    dv1 = abs(v_perigee - v1)
+    dv2 = abs(v2 - v_apogee)
+    total_dv = dv1 + dv2
+    
+    return total_dv, dv1, dv2
 
-# 1. Satellite Selector
-sat_data, status = load_satellites()
-target_name = st.sidebar.selectbox("SELECT TARGET", ["ISS (ZARYA)", "TIANGONG", "HST", "CSS (TIANHE)"])
+# --- 3. THE UI LAYER ---
+
+# Sidebar: Controls
+st.sidebar.title("ACCESS TERMINAL")
+sat_data, status = get_ephemeris()
+target_name = st.sidebar.selectbox("Active Asset", ["ISS (ZARYA)", "HST", "TIANGONG"])
+mode = st.sidebar.radio("Operation Mode", ["Live Telemetry", "Flight Computer (CAS)"])
+
+ts = load.timescale()
+# CRITICAL FIX: Use timezone-aware datetime to prevent crash
+t_now = ts.from_datetime(datetime.now(timezone.utc))
+
 sat = sat_data.get(target_name, sat_data['ISS (ZARYA)'])
 
-# 2. Time Dilation (The Interactive Predictor)
-st.sidebar.markdown("---")
-st.sidebar.subheader("⏳ TEMPORAL SHIFT")
-time_offset = st.sidebar.slider("Propagate Orbit (Hours)", 0, 24, 0, 1)
+# Header
+c1, c2 = st.columns([3, 1])
+with c1:
+    st.title(f"// {target_name}")
+    st.caption("ORBITGUARD DEFENSE GRID v4.0")
+with c2:
+    st.metric("CONN_STATUS", status)
 
-# --- MAIN PHYSICS CALCULATIONS ---
-ts = load.timescale()
-t_now = ts.now()
-# Apply the "Time Dilation" from the slider
-t_future = ts.from_datetime(datetime.utcnow() + timedelta(hours=time_offset))
-
-# Calculate Position at t_future
-geocentric = sat.at(t_future)
-subpoint = wgs84.subpoint(geocentric)
-speed = np.linalg.norm(geocentric.velocity.km_per_s)
-
-# --- UI LAYOUT ---
-
-# Header with "Hacker" status
-col_h1, col_h2 = st.columns([4, 1])
-with col_h1:
-    st.title(f"// {target_name} COMMAND")
-    if time_offset > 0:
-        st.caption(f"⚠️ SIMULATING FUTURE TRAJECTORY: T+{time_offset} HOURS")
-    else:
-        st.caption("🔴 LIVE TELEMETRY STREAM")
-with col_h2:
-    st.metric("SYS.STATUS", status)
-
-
-# ROW 1: THE VISUALS (Radar & Globe)
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    st.subheader("📡 LOCAL RADAR (RICHMOND)")
-    # Calculate Sky Plot (Azimuth/Elevation relative to Richmond)
-    # This is "Look Angle" Math
-    richmond = wgs84.latlon(49.1666, -123.1336)
-    difference = sat - richmond
-    topocentric = difference.at(t_future)
-    alt, az, distance = topocentric.altaz()
+if mode == "Live Telemetry":
+    # --- LIVE MODE (Tracking) ---
     
-    # Polar Plot
-    fig_radar = go.Figure(go.Scatterpolar(
-        r=[90 - alt.degrees if alt.degrees > 0 else None], # Radius (90 is center)
-        theta=[az.degrees if alt.degrees > 0 else None],   # Angle
-        mode='markers',
-        marker=dict(color='#00ff41', size=20, symbol='cross-thin-open'),
-        name=target_name
-    ))
-    fig_radar.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, 90], showticklabels=False), # 90 degrees (horizon) to 0 (zenith)
-            angularaxis=dict(direction="clockwise", rotation=90, color="#00ff41"),
-            bgcolor="#0b0f19"
-        ),
-        paper_bgcolor="#00000000",
+    # Physics: Calculate Position
+    geocentric = sat.at(t_now)
+    subpoint = wgs84.subpoint(geocentric)
+    
+    # Visualization: 3D Globe
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("ORBITAL STATE VECTOR")
+        
+        # Generate Ground Track (Future Path)
+        minutes = np.arange(0, 90, 1)
+        times = ts.from_datetime(datetime.now(timezone.utc) + timedelta(minutes=1) * minutes[:, None])
+        # Flatten the times array for Skyfield
+        times_flat = times.flatten()
+        
+        path_geo = sat.at(times_flat)
+        path_sub = wgs84.subpoint(path_geo)
+        
+        fig = go.Figure()
+        
+        # 1. Earth
+        fig.add_trace(go.Scattergeo(
+            lon=path_sub.longitude.degrees, lat=path_sub.latitude.degrees,
+            mode='lines', line=dict(width=2, color='#00ff41'),
+            name='Projected Path'
+        ))
+        
+        # 2. Satellite
+        fig.add_trace(go.Scattergeo(
+            lon=[subpoint.longitude.degrees], lat=[subpoint.latitude.degrees],
+            mode='markers', marker=dict(size=12, color='white', symbol='diamond'),
+            name=target_name
+        ))
+        
+        fig.update_geos(
+            projection_type="orthographic",
+            showland=True, landcolor="#111", oceancolor="#000",
+            showcountries=False, showlakes=False
+        )
+        fig.update_layout(
+            margin={"r":0,"t":0,"l":0,"b":0},
+            paper_bgcolor="#00000000",
+            height=450
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.subheader("TELEMETRY")
+        st.metric("ALTITUDE", f"{subpoint.elevation.km:.2f} km")
+        st.metric("LATITUDE", f"{subpoint.latitude.degrees:.4f}°")
+        st.metric("LONGITUDE", f"{subpoint.longitude.degrees:.4f}°")
+        st.info("System calculating orbital perturbations via SGP4 propagation model.")
+
+elif mode == "Flight Computer (CAS)":
+    # --- CAS MODE (Problem Solving) ---
+    st.markdown("### 🚀 HOHMANN TRANSFER SOLVER")
+    st.markdown("Calculate the fuel required to move this satellite to a new orbit.")
+    
+    # Inputs
+    col_in1, col_in2 = st.columns(2)
+    with col_in1:
+        current_r = 6378 + 420 # Approx LEO
+        st.metric("CURRENT ORBIT RADIUS (r1)", f"{current_r} km")
+    with col_in2:
+        target_alt = st.number_input("TARGET ALTITUDE (km)", value=35786) # Geo Sync
+        target_r = 6378 + target_alt
+    
+    # The CAS Logic (Math)
+    total_dv, burn1, burn2 = solve_hohmann_transfer(current_r, target_r)
+    
+    # Visualization: The Transfer Orbit
+    theta = np.linspace(0, 2*np.pi, 100)
+    
+    # Circle 1 (Start)
+    x1 = current_r * np.cos(theta)
+    y1 = current_r * np.sin(theta)
+    
+    # Circle 2 (Target)
+    x2 = target_r * np.cos(theta)
+    y2 = target_r * np.sin(theta)
+    
+    # Ellipse (Transfer)
+    a = (current_r + target_r) / 2 # Semi-major axis
+    # Shift ellipse so focus is at (0,0) - Earth Center
+    c = a - current_r 
+    # Parametric ellipse equations
+    b = np.sqrt(a**2 - c**2) # Semi-minor axis (approx for viz)
+    
+    # Plotting the "Solution"
+    fig_orbit = go.Figure()
+    
+    # Earth (Center)
+    fig_orbit.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=20, color='blue'), name='Earth'))
+    
+    # Orbits
+    fig_orbit.add_trace(go.Scatter(x=x1, y=y1, mode='lines', line=dict(color='green', dash='dash'), name='Initial Orbit'))
+    fig_orbit.add_trace(go.Scatter(x=x2, y=y2, mode='lines', line=dict(color='red', dash='dash'), name='Target Orbit'))
+    
+    fig_orbit.update_layout(
+        plot_bgcolor="#000", paper_bgcolor="#000",
+        xaxis=dict(showgrid=False, visible=False), 
+        yaxis=dict(showgrid=False, visible=False, scaleanchor="x", scaleratio=1),
         margin=dict(l=20, r=20, t=20, b=20),
-        showlegend=False
-    )
-    st.plotly_chart(fig_radar, use_container_width=True)
-    
-    if alt.degrees > 0:
-        st.success(f"✅ TARGET VISIBLE: {alt.degrees:.1f}° ELEVATION")
-    else:
-        st.error("❌ TARGET BELOW HORIZON")
-
-with col2:
-    st.subheader("🌍 ORBITAL PROJECTION")
-    
-    # Calculate Path (Past and Future)
-    mins = np.arange(-90, 90, 2) # 3 hours of path
-    times_path = ts.utc(t_future.utc_datetime().year, t_future.utc_datetime().month, t_future.utc_datetime().day, 
-                        t_future.utc_datetime().hour, t_future.utc_datetime().minute + mins)
-    path_geo = sat.at(times_path)
-    path_sub = wgs84.subpoint(path_geo)
-    
-    fig_globe = go.Figure()
-    
-    # The Path
-    fig_globe.add_trace(go.Scattergeo(
-        lon=path_sub.longitude.degrees, lat=path_sub.latitude.degrees,
-        mode='lines', line=dict(width=2, color='#00441b'), # Dark Green ghost path
-        name='Trajectory'
-    ))
-    
-    # The Satellite (At Selected Time)
-    fig_globe.add_trace(go.Scattergeo(
-        lon=[subpoint.longitude.degrees], lat=[subpoint.latitude.degrees],
-        mode='markers', marker=dict(size=15, color='#00ff41', symbol='diamond'), # Bright Green
-        name='Target'
-    ))
-
-    fig_globe.update_geos(
-        projection_type="orthographic",
-        showland=True, landcolor="#0f172a",
-        showocean=True, oceancolor="#020617",
-        showcountries=False, showlakes=False
-    )
-    fig_globe.update_layout(
-        margin={"r":0,"t":0,"l":0,"b":0},
-        paper_bgcolor="#00000000",
         height=400
     )
-    st.plotly_chart(fig_globe, use_container_width=True)
-
-# ROW 2: THE APPLICABLE PHYSICS (Vis-Viva Calculator)
-st.markdown("---")
-st.subheader("🚀 MANEUVER CALCULATOR (VIS-VIVA SOLVER)")
-
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    st.info("CURRENT ORBIT")
-    r_current = 6378 + subpoint.elevation.km # Radius from Earth Center
-    st.metric("Semi-Major Axis (r1)", f"{r_current:.1f} km")
-
-with c2:
-    st.warning("TARGET ORBIT")
-    target_alt = st.number_input("Desired Altitude (km)", value=500, min_value=300, max_value=2000)
-    r_target = 6378 + target_alt
-
-with c3:
-    st.success("REQUIRED DELTA-V")
-    # THE PHYSICS: Hohmann Transfer Delta-V Calculation
-    mu = 398600 # Earth Gravitational Parameter
     
-    # Velocity at Perigee (Burn Point)
-    v1 = math.sqrt(mu / r_current)
-    # Velocity required for Transfer Ellipse
-    v_transfer = math.sqrt(mu * (2/r_current - 2/(r_current + r_target)))
-    
-    delta_v = abs(v_transfer - v1) * 1000 # Convert to m/s
-    
-    st.metric("Δv (Burn)", f"{delta_v:.2f} m/s", delta="Fuel Cost")
-
-st.caption("Calculation based on Hohmann Transfer optimality. Assumes coplanar circularization.")
+    # Results Dashboard
+    r1, r2 = st.columns([2, 1])
+    with r1:
+        st.plotly_chart(fig_orbit, use_container_width=True)
+    with r2:
+        st.success(f"TOTAL DELTA-V: {total_dv:.3f} km/s")
+        st.write("---")
+        st.write(f"**BURN 1 (Injection):** {burn1:.3f} km/s")
+        st.write(f"**BURN 2 (Circularize):** {burn2:.3f} km/s")
+        st.caption("Calculated using Vis-Viva Equation")
