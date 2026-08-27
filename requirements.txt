@@ -1,6 +1,4 @@
 streamlit
-plotly
-skyfield
 pandas
 numpy
-pytz
+plotly
