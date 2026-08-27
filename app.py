@@ -4,159 +4,191 @@ import numpy as np
 import plotly.graph_objects as go
 from skyfield.api import load, wgs84, EarthSatellite
 from datetime import datetime, timedelta
-import pytz
+import math
 
-# --- CONFIGURATION ---
-st.set_page_config(layout="wide", page_title="OrbitGuard | Command", page_icon="🛰️")
+# --- CONFIGURATION & CYBERPUNK THEME ---
+st.set_page_config(layout="wide", page_title="OrbitGuard | Command", page_icon="🔭")
 
-# --- CUSTOM CSS (CYBERPUNK AESTHETIC) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #050505; }
+    /* FORCE DARK MODE & TERMINAL FONT */
+    .stApp { background-color: #000508; color: #00ff41; }
+    
+    /* CUSTOM METRIC BOXES */
     div.stMetric {
-        background-color: #111;
-        border: 1px solid #333;
-        padding: 10px;
-        border-radius: 5px;
-        border-left: 5px solid #00ff41;
+        background-color: #0b0f19;
+        border: 1px solid #1f2937;
+        padding: 15px;
+        border-radius: 4px;
+        box-shadow: 0 0 10px rgba(0, 255, 65, 0.1);
     }
-    h1, h2, h3 { color: #e0e0e0; font-family: 'Courier New', monospace; }
-    .status-live { color: #00ff41; font-weight: bold; }
-    .status-offline { color: #ff4b4b; font-weight: bold; }
+    label { color: #00ff41 !important; font-family: 'Courier New'; }
+    .stSlider > div > div > div > div { background-color: #00ff41; }
+    h1, h2, h3 { color: #e5e7eb; font-family: 'Courier New', monospace; letter-spacing: -1px; }
+    
+    /* RADAR GLOW */
+    .js-plotly-plot { filter: drop-shadow(0px 0px 5px rgba(0,255,65,0.3)); }
 </style>
 """, unsafe_allow_html=True)
 
-# --- BACKEND: FAILOVER SYSTEM ---
+# --- BACKEND: PHYSICS ENGINE ---
 @st.cache_resource
-def load_data():
-    """
-    Attempts to fetch live TLE data from Celestrak (HTTPS).
-    If connection fails, loads 'Emergency Backup' data so the app never crashes.
-    """
+def load_satellites():
+    # Cache the data so sliding the time bar is instant
     ts = load.timescale()
-    
-    # 1. The Live Source (Must be HTTPS)
-    live_url = 'https://celestrak.org/NORAD/elements/stations.txt'
-    
+    url = 'https://celestrak.org/NORAD/elements/stations.txt'
     try:
-        # Try to download live data
-        satellites = load.tle_file(live_url)
-        by_name = {sat.name: sat for sat in satellites}
-        return by_name, "ONLINE (LIVE FEED)"
-        
-    except Exception as e:
-        # 2. The Failover (Emergency Backup Data)
-        # This guarantees the app works even if Celestrak is down.
-        # Fallback TLE for ISS (ZARYA)
+        sats = load.tle_file(url)
+        return {s.name: s for s in sats}, "LIVE FEED"
+    except:
+        # Failover TLE (ISS)
         line1 = "1 25544U 98067A   24143.42848900  .00014603  00000+0  26343-3 0  9997"
         line2 = "2 25544  51.6398 108.6657 0004149 105.1328 344.2093 15.50346123455086"
         iss = EarthSatellite(line1, line2, 'ISS (ZARYA)', ts)
-        
-        return {'ISS (ZARYA)': iss}, "OFFLINE (BACKUP DATA ACTIVE)"
+        return {'ISS (ZARYA)': iss}, "BACKUP FEED"
 
-def calculate_path(sat, minutes=90):
-    """Generates the orbital path for the 3D Globe"""
-    ts = load.timescale()
-    t_now = ts.now()
-    # Create a time range: -30 mins to +60 mins
-    mins = np.arange(-30, 60, 1)
-    times = ts.utc(t_now.utc_datetime().year, t_now.utc_datetime().month, t_now.utc_datetime().day, 
-                   t_now.utc_datetime().hour, t_now.utc_datetime().minute + mins)
-    
-    geocentric = sat.at(times)
-    subpoints = wgs84.subpoint(geocentric)
-    
-    return pd.DataFrame({
-        'lat': subpoints.latitude.degrees,
-        'lon': subpoints.longitude.degrees
-    })
+# --- SIDEBAR: MISSION CONTROLS ---
+st.sidebar.header("🕹️ MISSION CONTROLS")
 
-# --- APP LOGIC ---
+# 1. Satellite Selector
+sat_data, status = load_satellites()
+target_name = st.sidebar.selectbox("SELECT TARGET", ["ISS (ZARYA)", "TIANGONG", "HST", "CSS (TIANHE)"])
+sat = sat_data.get(target_name, sat_data['ISS (ZARYA)'])
 
-# 1. Load Data (With Error Protection)
-sat_dict, system_status = load_data()
-sat_name = "ISS (ZARYA)"
+# 2. Time Dilation (The Interactive Predictor)
+st.sidebar.markdown("---")
+st.sidebar.subheader("⏳ TEMPORAL SHIFT")
+time_offset = st.sidebar.slider("Propagate Orbit (Hours)", 0, 24, 0, 1)
 
-if sat_name not in sat_dict:
-    st.error("Critical System Failure: Backup TLE Missing.")
-    st.stop()
-
-sat = sat_dict[sat_name]
+# --- MAIN PHYSICS CALCULATIONS ---
 ts = load.timescale()
 t_now = ts.now()
+# Apply the "Time Dilation" from the slider
+t_future = ts.from_datetime(datetime.utcnow() + timedelta(hours=time_offset))
 
-# 2. Calculate Real-Time Position
-geocentric = sat.at(t_now)
+# Calculate Position at t_future
+geocentric = sat.at(t_future)
 subpoint = wgs84.subpoint(geocentric)
+speed = np.linalg.norm(geocentric.velocity.km_per_s)
 
-# 3. UI Header
-col1, col2 = st.columns([3, 1])
+# --- UI LAYOUT ---
+
+# Header with "Hacker" status
+col_h1, col_h2 = st.columns([4, 1])
+with col_h1:
+    st.title(f"// {target_name} COMMAND")
+    if time_offset > 0:
+        st.caption(f"⚠️ SIMULATING FUTURE TRAJECTORY: T+{time_offset} HOURS")
+    else:
+        st.caption("🔴 LIVE TELEMETRY STREAM")
+with col_h2:
+    st.metric("SYS.STATUS", status)
+
+
+# ROW 1: THE VISUALS (Radar & Globe)
+col1, col2 = st.columns([1, 2])
+
 with col1:
-    st.title("🛰️ OrbitGuard Pro")
-    st.caption("Advanced Telemetry & Trajectory Prediction System")
+    st.subheader("📡 LOCAL RADAR (RICHMOND)")
+    # Calculate Sky Plot (Azimuth/Elevation relative to Richmond)
+    # This is "Look Angle" Math
+    richmond = wgs84.latlon(49.1666, -123.1336)
+    difference = sat - richmond
+    topocentric = difference.at(t_future)
+    alt, az, distance = topocentric.altaz()
+    
+    # Polar Plot
+    fig_radar = go.Figure(go.Scatterpolar(
+        r=[90 - alt.degrees if alt.degrees > 0 else None], # Radius (90 is center)
+        theta=[az.degrees if alt.degrees > 0 else None],   # Angle
+        mode='markers',
+        marker=dict(color='#00ff41', size=20, symbol='cross-thin-open'),
+        name=target_name
+    ))
+    fig_radar.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 90], showticklabels=False), # 90 degrees (horizon) to 0 (zenith)
+            angularaxis=dict(direction="clockwise", rotation=90, color="#00ff41"),
+            bgcolor="#0b0f19"
+        ),
+        paper_bgcolor="#00000000",
+        margin=dict(l=20, r=20, t=20, b=20),
+        showlegend=False
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+    
+    if alt.degrees > 0:
+        st.success(f"✅ TARGET VISIBLE: {alt.degrees:.1f}° ELEVATION")
+    else:
+        st.error("❌ TARGET BELOW HORIZON")
+
 with col2:
-    color = "green" if "ONLINE" in system_status else "red"
-    st.markdown(f"**SYSTEM STATUS:** :{color}[{system_status}]")
-    st.markdown(f"**UTC:** {datetime.utcnow().strftime('%H:%M:%S')}")
+    st.subheader("🌍 ORBITAL PROJECTION")
+    
+    # Calculate Path (Past and Future)
+    mins = np.arange(-90, 90, 2) # 3 hours of path
+    times_path = ts.utc(t_future.utc_datetime().year, t_future.utc_datetime().month, t_future.utc_datetime().day, 
+                        t_future.utc_datetime().hour, t_future.utc_datetime().minute + mins)
+    path_geo = sat.at(times_path)
+    path_sub = wgs84.subpoint(path_geo)
+    
+    fig_globe = go.Figure()
+    
+    # The Path
+    fig_globe.add_trace(go.Scattergeo(
+        lon=path_sub.longitude.degrees, lat=path_sub.latitude.degrees,
+        mode='lines', line=dict(width=2, color='#00441b'), # Dark Green ghost path
+        name='Trajectory'
+    ))
+    
+    # The Satellite (At Selected Time)
+    fig_globe.add_trace(go.Scattergeo(
+        lon=[subpoint.longitude.degrees], lat=[subpoint.latitude.degrees],
+        mode='markers', marker=dict(size=15, color='#00ff41', symbol='diamond'), # Bright Green
+        name='Target'
+    ))
 
-# 4. The 3D Mission Control Map
-st.subheader("Global Trajectory")
+    fig_globe.update_geos(
+        projection_type="orthographic",
+        showland=True, landcolor="#0f172a",
+        showocean=True, oceancolor="#020617",
+        showcountries=False, showlakes=False
+    )
+    fig_globe.update_layout(
+        margin={"r":0,"t":0,"l":0,"b":0},
+        paper_bgcolor="#00000000",
+        height=400
+    )
+    st.plotly_chart(fig_globe, use_container_width=True)
 
-path_df = calculate_path(sat)
+# ROW 2: THE APPLICABLE PHYSICS (Vis-Viva Calculator)
+st.markdown("---")
+st.subheader("🚀 MANEUVER CALCULATOR (VIS-VIVA SOLVER)")
 
-fig = go.Figure()
+c1, c2, c3 = st.columns(3)
 
-# Layer 1: The Orbit Path (Green Line)
-fig.add_trace(go.Scattergeo(
-    lon=path_df['lon'], lat=path_df['lat'],
-    mode='lines', line=dict(width=2, color='#00ff41'),
-    name='Orbit Path'
-))
+with c1:
+    st.info("CURRENT ORBIT")
+    r_current = 6378 + subpoint.elevation.km # Radius from Earth Center
+    st.metric("Semi-Major Axis (r1)", f"{r_current:.1f} km")
 
-# Layer 2: The Satellite (Red Diamond)
-fig.add_trace(go.Scattergeo(
-    lon=[subpoint.longitude.degrees], lat=[subpoint.latitude.degrees],
-    mode='markers', marker=dict(size=15, color='red', symbol='diamond'),
-    name='Current Pos'
-))
+with c2:
+    st.warning("TARGET ORBIT")
+    target_alt = st.number_input("Desired Altitude (km)", value=500, min_value=300, max_value=2000)
+    r_target = 6378 + target_alt
 
-# Layer 3: Vancouver (Home Base)
-fig.add_trace(go.Scattergeo(
-    lon=[-123.1207], lat=[49.2827],
-    mode='markers+text', marker=dict(size=5, color='cyan'),
-    text=["UBC Station"], textposition="top center",
-    name='Ground Station'
-))
+with c3:
+    st.success("REQUIRED DELTA-V")
+    # THE PHYSICS: Hohmann Transfer Delta-V Calculation
+    mu = 398600 # Earth Gravitational Parameter
+    
+    # Velocity at Perigee (Burn Point)
+    v1 = math.sqrt(mu / r_current)
+    # Velocity required for Transfer Ellipse
+    v_transfer = math.sqrt(mu * (2/r_current - 2/(r_current + r_target)))
+    
+    delta_v = abs(v_transfer - v1) * 1000 # Convert to m/s
+    
+    st.metric("Δv (Burn)", f"{delta_v:.2f} m/s", delta="Fuel Cost")
 
-# Styling: 3D Orthographic Projection (The "Globe" Look)
-fig.update_geos(
-    projection_type="orthographic",
-    showland=True, landcolor="#1f2937",
-    showocean=True, oceancolor="#0b0f19",
-    showcountries=True, countrycolor="#374151",
-    showlakes=False
-)
-
-fig.update_layout(
-    height=600, margin={"r":0,"t":0,"l":0,"b":0},
-    paper_bgcolor="#00000000",
-    font=dict(color="white"),
-    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(0,0,0,0.5)")
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# 5. Telemetry Cards
-st.subheader("Live Telemetry")
-m1, m2, m3, m4 = st.columns(4)
-
-with m1:
-    st.metric("Altitude", f"{subpoint.elevation.km:.1f} km", delta="LEO")
-with m2:
-    st.metric("Latitude", f"{subpoint.latitude.degrees:.4f}°")
-with m3:
-    st.metric("Longitude", f"{subpoint.longitude.degrees:.4f}°")
-with m4:
-    # Calculate approx speed based on altitude (Vis-viva equation simplified)
-    st.metric("Velocity (Est)", "7.66 km/s", "Orbital")
-
+st.caption("Calculation based on Hohmann Transfer optimality. Assumes coplanar circularization.")
