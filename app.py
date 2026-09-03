@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 # --- 1. CINEMATIC CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="ExoHunter | Genesis", page_icon="🪐")
 
-# EXPERT CSS: "Glassmorphism" & Smooth Animations
+# EXPERT CSS: Glassmorphism, Animations, and Deep Space
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500&display=swap');
@@ -37,7 +37,7 @@ st.markdown("""
         border-radius: 10px;
     }
 
-    /* SUCCESS STATE GLOW */
+    /* SUCCESS STATE GLOW (When Habitable) */
     .habitable-glow {
         border: 2px solid #00ff41 !important;
         box-shadow: 0 0 30px rgba(0, 255, 65, 0.4) !important;
@@ -49,7 +49,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. PHYSICS ENGINE (ROBUST) ---
+# --- 2. PHYSICS ENGINE (DEBUGGED) ---
 
 @st.cache_data
 def load_data():
@@ -59,16 +59,16 @@ def load_data():
         df = pd.read_csv(url)
         df = df.rename(columns={'pl_name': 'Name', 'pl_rade': 'Radius', 'pl_masse': 'Mass', 'pl_eqt': 'Temp', 'sy_dist': 'Distance'})
         df = df.dropna()
-        # Filter for interesting planets (Super-Earths)
+        # Filter for interesting planets (Super-Earths, < 100 Parsecs)
         return df[(df['Radius'] < 2.5) & (df['Distance'] < 100)].sort_values('Distance'), "ONLINE (NASA ARCHIVE)"
     except:
         # Emergency Data
         data = {
             'Name': ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-442 b', 'K2-18 b', 'Teegarden b'],
-            'Radius': [1.07, 0.92, 1.34, 2.6, 1.05],
-            'Mass': [1.17, 0.69, 2.3, 8.6, 1.05],
-            'Temp': [234, 251, 233, 265, 290],
-            'Distance': [1.3, 12.0, 370, 38, 3.8]
+            'Radius': [1.03, 0.91, 1.34, 2.37, 1.02],
+            'Mass': [1.07, 0.77, 2.30, 8.92, 1.05],
+            'Temp': [234, 251, 233, 265, 260],
+            'Distance': [1.3, 12.1, 342.0, 38.0, 3.8]
         }
         return pd.DataFrame(data), "OFFLINE (SIMULATION)"
 
@@ -142,9 +142,10 @@ with st.sidebar:
     st.markdown("---")
     if mode == "🧬 GENESIS LAB":
         st.write("Target Selection")
-        planet_list = df['Name'].head(20).tolist()
+        planet_list = df['Name'].head(50).unique().tolist()
         selected_planet = st.selectbox("Candidate World", planet_list)
-        planet_data = df[df['Name'] == selected_planet].iloc
+        # FIX 1: Extract row safely using .iloc[0]
+        planet_data = df[df['Name'] == selected_planet].iloc[0]
 
 # --- MODULE 1: GALAXY SCANNER ---
 if mode == "🌌 GALAXY SCANNER":
@@ -202,12 +203,15 @@ elif mode == "🧬 GENESIS LAB":
         
         # STATUS
         if 260 < new_temp < 310:
-            st.success("✅ BIOSPHERE STABLE: WATER DETECTED")
+            st.markdown("### ✅ BIOSPHERE STATUS: **STABLE**")
+            st.success("Liquid Water Detected. Atmosphere Breathable.")
             st.balloons()
         elif new_temp > 373:
-            st.error("⚠️ CRITICAL: SURFACE BOILING")
+            st.markdown("### ⚠️ BIOSPHERE STATUS: **CRITICAL**")
+            st.error("Surface Boiling. Cooling Array Required.")
         else:
-            st.info("❄️ CRITICAL: GLACIATION DETECTED")
+            st.markdown("### ❄️ BIOSPHERE STATUS: **DORMANT**")
+            st.info("Glaciation Detected. Greenhouse Injection Required.")
 
     with col_viz:
         # THE 3D PLANET
@@ -235,14 +239,15 @@ elif mode == "🧬 GENESIS LAB":
         )
         st.plotly_chart(fig, use_container_width=True)
 
-# --- MODULE 3: WARP DRIVE (BUG FREE) ---
+# --- MODULE 3: WARP DRIVE (DEBUGGED) ---
 elif mode == "🚀 WARP DRIVE":
     st.title("RELATIVITY ENGINE")
     
     c1, c2 = st.columns(2)
     with c1:
         target = st.selectbox("Destination", df['Name'].head(15))
-        dist = df.loc[df['Name'] == target, 'Distance'].values
+        # FIX 2: Extract scalar value safely using .values[0]
+        dist = df.loc[df['Name'] == target, 'Distance'].values[0]
         st.metric("Distance", f"{dist:.1f} Parsecs", f"{(dist*3.26):.1f} Light Years")
     with c2:
         velocity = st.slider("Warp Velocity (% c)", 0.1, 0.999, 0.5)
@@ -256,7 +261,6 @@ elif mode == "🚀 WARP DRIVE":
     st.markdown("---")
     g1, g2, g3 = st.columns(3)
     
-    # FIXED SYNTAX ERROR HERE
     fig_gamma = go.Figure(go.Indicator(
         mode = "gauge+number",
         value = gamma,
