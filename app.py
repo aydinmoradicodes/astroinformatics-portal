@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px  # <--- FIXED: THIS WAS MISSING
+import plotly.express as px
 import plotly.graph_objects as go
 
 # --- 1. CINEMATIC CONFIGURATION ---
@@ -25,7 +25,7 @@ st.markdown("""
 
     /* HUD TYPOGRAPHY */
     h1, h2, h3 { font-family: 'Orbitron', sans-serif !important; color: #00f2ff !important; text-shadow: 0px 0px 10px rgba(0, 242, 255, 0.6); }
-    p, div, label, span { font-family: 'Rajdhani', sans-serif !important; color: #e0e0e0; }
+    p, div, label, span { font-family: 'Rajdhani', sans-serif !important; color: #e0e0e0; font-size: 16px; }
     
     /* NEON METRIC BOXES */
     div.stMetric {
@@ -37,21 +37,13 @@ st.markdown("""
         padding: 10px;
     }
     
-    /* CUSTOM BUTTONS */
-    .stButton>button {
-        background: linear-gradient(90deg, #00f2ff, #0051ff);
-        color: #000;
-        font-family: 'Orbitron';
-        border: none;
-        padding: 10px 20px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover { transform: scale(1.05); box-shadow: 0 0 20px #00f2ff; }
+    /* CUSTOM BUTTONS & SELECTBOXES */
+    .stSelectbox > div > div { background-color: #0b121c; color: white; border: 1px solid #00f2ff; }
+    .stSlider > div > div > div > div { background-color: #00f2ff; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. PHYSICS ENGINE ---
+# --- 2. PHYSICS ENGINE (ROBUST MODE) ---
 
 @st.cache_data
 def load_data():
@@ -60,17 +52,17 @@ def load_data():
     try:
         df = pd.read_csv(url)
         df = df.rename(columns={'pl_name': 'Name', 'pl_rade': 'Radius', 'pl_masse': 'Mass', 'pl_eqt': 'Temp', 'sy_dist': 'Distance'})
-        return df.dropna(), "ONLINE"
+        return df.dropna(), "ONLINE (NASA ARCHIVE)"
     except:
         # FALLBACK DATA (Prevents Crash)
         data = {
             'Name': ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-442 b', 'K2-18 b', 'Wolf 1061 c'],
-            'Radius': [1.03, 0.91, 1.34, 2.37, 1.66],
-            'Mass': [1.07, 0.77, 2.30, 8.92, 4.30],
-            'Temp': [234, 251, 233, 265, 223],
-            'Distance': [1.3, 12.1, 342.0, 38.0, 4.3]
+            'Radius': [1.03, 0.92, 1.34, 2.61, 1.66],
+            'Mass': [1.07, 0.69, 2.34, 8.63, 4.26],
+            'Temp': [234, 251, 260, 265, 223],
+            'Distance': [1.3, 12.1, 342, 38, 4.3]
         }
-        return pd.DataFrame(data), "OFFLINE (SIMULATION)"
+        return pd.DataFrame(data), "OFFLINE (SIMULATION MODE)"
 
 def generate_planet_texture(temp, atmosphere):
     """
@@ -110,8 +102,9 @@ def generate_planet_texture(temp, atmosphere):
 
 df, status = load_data()
 
-# SIDEBAR
+# SIDEBAR (LOGO IS BACK)
 with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg", width=120)
     st.title("EXO-HUNTER")
     st.caption(f"SYSTEM STATUS: {status}")
     mode = st.radio("SELECT MODULE", ["🌌 GALAXY SCANNER", "🧬 GENESIS LAB", "🚀 WARP DRIVE"], index=1)
@@ -119,15 +112,18 @@ with st.sidebar:
     st.markdown("---")
     if mode == "🧬 GENESIS LAB":
         st.write("**TARGET LOCK:**")
-        selected_planet = st.selectbox("Select Candidate", df['Name'].head(15))
-        planet_data = df[df['Name'] == selected_planet].iloc
+        # Ensure we only pick valid names
+        valid_names = df['Name'].head(15).tolist()
+        selected_planet = st.selectbox("Select Candidate", valid_names)
+        # FIX: Robust Data Selection
+        planet_data = df[df['Name'] == selected_planet].iloc[0]
 
-# --- MODULE 1: GALAXY SCANNER (Fixed) ---
+# --- MODULE 1: GALAXY SCANNER ---
 if mode == "🌌 GALAXY SCANNER":
     st.title("DEEP FIELD ARRAY")
-    st.markdown("Real-time 3D plotting of confirmed exoplanets within 50 Parsecs.")
+    st.markdown("Real-time 3D plotting of confirmed exoplanets.")
     
-    # 3D Scatter Plot (Fixed import)
+    # 3D Scatter Plot
     fig = px.scatter_3d(
         df.head(200), # Limit to 200 for speed
         x='Distance', y='Temp', z='Radius',
@@ -152,9 +148,10 @@ if mode == "🌌 GALAXY SCANNER":
     )
     st.plotly_chart(fig, use_container_width=True)
 
-# --- MODULE 2: GENESIS LAB (The Visual Stunner) ---
+# --- MODULE 2: GENESIS LAB (FIXED LAYOUT) ---
 elif mode == "🧬 GENESIS LAB":
-    c1, c2 = st.columns()
+    # FIX: Explicitly defined columns (2) to prevent TypeError
+    c1, c2 = st.columns(2)
     
     with c1:
         st.subheader(f"// ENGINEERING: {selected_planet}")
@@ -172,16 +169,18 @@ elif mode == "🧬 GENESIS LAB":
         
         # HUD Metrics
         st.markdown("---")
+        # FIX: Nested columns for metrics
         col_m1, col_m2 = st.columns(2)
         col_m1.metric("Surface Temp", f"{new_temp:.0f} K", delta=f"{new_temp-288:.0f} K")
         col_m2.metric("Habitability", f"{esi:.2f}", delta="ESI Score")
         
+        st.markdown("### STATUS REPORT")
         if 260 < new_temp < 310:
-            st.success("✅ BIOSPHERE STABLE")
+            st.success("✅ BIOSPHERE STABLE: LIQUID WATER DETECTED")
         elif new_temp > 373:
-            st.error("⚠️ WATER BOILING")
+            st.error("⚠️ CRITICAL FAILURE: WATER BOILING")
         else:
-            st.info("❄️ SURFACE FROZEN")
+            st.info("❄️ CRITICAL FAILURE: SURFACE FROZEN")
 
     with c2:
         # The 3D Planet Renderer
@@ -210,16 +209,18 @@ elif mode == "🧬 GENESIS LAB":
         )
         st.plotly_chart(fig, use_container_width=True)
 
-# --- MODULE 3: WARP DRIVE (Upgraded Visuals) ---
+# --- MODULE 3: WARP DRIVE (FIXED PANDAS BUG) ---
 elif mode == "🚀 WARP DRIVE":
     st.title("RELATIVITY ENGINE")
     st.markdown("Time Dilation Simulator (Lorentz Factor Calculator)")
     
     # 1. Inputs
+    # FIX: Defined 2 columns
     c1, c2 = st.columns(2)
     with c1:
         target = st.selectbox("Destination", df['Name'].head(10))
-        dist = df[df['Name'] == target].iloc['Distance']
+        # FIX: Correct way to get scalar value from Pandas
+        dist = df.loc[df['Name'] == target, 'Distance'].values[0]
         st.metric("Distance", f"{dist:.1f} Parsecs", f"{(dist*3.26):.1f} Light Years")
     with c2:
         velocity = st.slider("Warp Velocity (% c)", 0.1, 0.999, 0.5, 0.001)
@@ -229,8 +230,9 @@ elif mode == "🚀 WARP DRIVE":
     ship_time = (dist * 3.26) / velocity / gamma
     earth_time = (dist * 3.26) / velocity
     
-    # 3. New Visuals: COCKPIT GAUGES (No more crashing bar charts)
+    # 3. New Visuals: COCKPIT GAUGES
     st.markdown("---")
+    # FIX: Defined 3 columns
     g1, g2, g3 = st.columns(3)
     
     # Gauge 1: Time Dilation
@@ -238,10 +240,10 @@ elif mode == "🚀 WARP DRIVE":
         mode = "gauge+number",
         value = gamma,
         title = {'text': "Time Dilation (γ)"},
-        gauge = {'axis': {'range': [1, 25]}, 'bar': {'color': "#00f2ff"},
-                 'steps': [{'range': [1, 5], 'color': "#333"}, {'range': [5, 25], 'color': "#111"}]}
+        gauge = {'axis': {'range': [1, 20]}, 'bar': {'color': "#00f2ff"},
+                 'steps': [{'range': [0, 5], 'color': "#333"}, {'range': [5, 20], 'color': "#111"}]}
     ))
-    fig_gamma.update_layout(paper_bgcolor='rgba(0,0,0,0)', font={'color': "white", 'family': "Orbitron"})
+    fig_gamma.update_layout(height=250, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white", 'family': "Orbitron"})
     g1.plotly_chart(fig_gamma, use_container_width=True)
     
     # Gauge 2: Ship Clock
@@ -250,7 +252,7 @@ elif mode == "🚀 WARP DRIVE":
     # Gauge 3: Earth Clock
     g3.metric("Observer Time (Earth)", f"{earth_time:.1f} Years", "Aged More")
     
-    # Comparison Chart (Fixed)
+    # Comparison Chart
     fig_comp = go.Figure()
     fig_comp.add_trace(go.Bar(
         y=['Years Passed'], x=[ship_time], name='Astronaut', orientation='h', marker_color='#00f2ff'
@@ -261,6 +263,7 @@ elif mode == "🚀 WARP DRIVE":
     fig_comp.update_layout(
         title="THE TWIN PARADOX",
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white', xaxis_title="Years"
+        font_color='white', xaxis_title="Years",
+        height=300
     )
     st.plotly_chart(fig_comp, use_container_width=True)
