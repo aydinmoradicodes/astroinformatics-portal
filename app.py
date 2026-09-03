@@ -1,17 +1,18 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px  # <--- FIXED: THIS WAS MISSING
 import plotly.graph_objects as go
 
-# --- 1. THE CINEMATIC CONFIGURATION ---
+# --- 1. CINEMATIC CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="ExoHunter | Genesis", page_icon="🪐")
 
-# Injecting "Orbitron" Font & Deep Space Background
+# Injecting "Orbitron" Font & Deep Space UI
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500&display=swap');
 
-    /* BACKGROUND: Deep Space Starfield */
+    /* DEEP SPACE BACKGROUND */
     .stApp {
         background-color: #000000;
         background-image: 
@@ -24,215 +25,242 @@ st.markdown("""
 
     /* HUD TYPOGRAPHY */
     h1, h2, h3 { font-family: 'Orbitron', sans-serif !important; color: #00f2ff !important; text-shadow: 0px 0px 10px rgba(0, 242, 255, 0.6); }
-    p, div, label { font-family: 'Rajdhani', sans-serif !important; font-size: 18px; color: #e0e0e0; }
-
-    /* GLASSMORPHISM PANELS */
-    div.stMetric, div.css-1r6slb0 {
-        background: rgba(10, 20, 30, 0.7);
-        border: 1px solid rgba(0, 242, 255, 0.2);
-        box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(10px);
-        border-radius: 8px;
+    p, div, label, span { font-family: 'Rajdhani', sans-serif !important; color: #e0e0e0; }
+    
+    /* NEON METRIC BOXES */
+    div.stMetric {
+        background: rgba(10, 20, 30, 0.8);
+        border: 1px solid rgba(0, 242, 255, 0.3);
+        box-shadow: 0 0 15px rgba(0, 242, 255, 0.1);
+        backdrop-filter: blur(5px);
+        border-radius: 5px;
+        padding: 10px;
     }
     
-    /* INTERACTIVE ELEMENTS */
+    /* CUSTOM BUTTONS */
     .stButton>button {
-        background: linear-gradient(45deg, #00f2ff, #0051ff);
-        border: none;
-        color: black;
+        background: linear-gradient(90deg, #00f2ff, #0051ff);
+        color: #000;
         font-family: 'Orbitron';
+        border: none;
+        padding: 10px 20px;
         font-weight: bold;
-        transition: 0.3s;
+        transition: all 0.3s ease;
     }
     .stButton>button:hover { transform: scale(1.05); box-shadow: 0 0 20px #00f2ff; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. THE PHYSICS & RENDERING ENGINE ---
+# --- 2. PHYSICS ENGINE ---
 
 @st.cache_data
 def load_data():
-    """Robust Data Loader (Live + Backup)"""
+    """Robust Data Loader with Emergency Backup"""
     url = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+pl_name,pl_rade,pl_masse,pl_eqt,sy_dist,st_teff,st_rad,disc_year+from+pscomppars+where+pl_rade+is+not+null+and+pl_masse+is+not+null&format=csv"
     try:
         df = pd.read_csv(url)
         df = df.rename(columns={'pl_name': 'Name', 'pl_rade': 'Radius', 'pl_masse': 'Mass', 'pl_eqt': 'Temp', 'sy_dist': 'Distance'})
         return df.dropna(), "ONLINE"
     except:
-        # Emergency Data
+        # FALLBACK DATA (Prevents Crash)
         data = {
-            'Name': ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-442 b', 'K2-18 b'],
-            'Radius': [1.03, 0.91, 1.34, 2.37],
-            'Mass': [1.07, 0.77, 2.30, 8.92],
-            'Temp': [234, 251, 233, 265],
-            'Distance': [1.3, 12.1, 342.0, 38.0]
+            'Name': ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-442 b', 'K2-18 b', 'Wolf 1061 c'],
+            'Radius': [1.03, 0.91, 1.34, 2.37, 1.66],
+            'Mass': [1.07, 0.77, 2.30, 8.92, 4.30],
+            'Temp': [234, 251, 233, 265, 223],
+            'Distance': [1.3, 12.1, 342.0, 38.0, 4.3]
         }
-        return pd.DataFrame(data), "OFFLINE"
+        return pd.DataFrame(data), "OFFLINE (SIMULATION)"
 
-def generate_procedural_planet(radius, temp, atmosphere_density):
+def generate_planet_texture(temp, atmosphere):
     """
-    GENESIS ENGINE: Procedurally generates a 3D sphere texture based on physics.
-    Hot -> Red/Lava. Cold -> White/Ice. Habitable -> Blue/Green/Clouds.
+    GENESIS ENGINE: Procedural 3D Texture Generation.
+    Links Thermodynamics -> Visual Color Mapping.
     """
-    # Create Sphere Topology
+    # Sphere Topology
     phi = np.linspace(0, 2*np.pi, 100)
     theta = np.linspace(0, np.pi, 100)
     phi, theta = np.meshgrid(phi, theta)
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
     
-    x = radius * np.sin(theta) * np.cos(phi)
-    y = radius * np.sin(theta) * np.sin(phi)
-    z = radius * np.cos(theta)
-    
-    # DETERMINE VISUAL CLASS (The "Game" Logic)
+    # Visual Logic (The "Game" Part)
     if temp > 800:
-        # Lava World
-        colorscale = 'Hot'
-        surface_color = np.random.rand(100, 100) * 0.5 + 0.5 # Volcanic noise
+        # LAVA WORLD
+        colorscale = [[0, 'black'], [0.5, 'red'], [1, 'orange']]
+        noise = np.random.rand(100, 100) * 0.4 # Magma flows
+        surface = noise + 0.5
     elif temp > 350:
-        # Desert World (Venus-like)
+        # DESERT/VENUS
         colorscale = 'YlOrBr'
-        surface_color = np.sin(phi*5) * np.cos(theta*5) # Dune patterns
-    elif temp < 200:
-        # Ice World
-        colorscale = 'Blues'
-        surface_color = np.random.rand(100, 100) * 0.2 # Icy noise
-    elif 260 < temp < 320 and atmosphere_density > 20:
-        # EARTH-LIKE (The Goal)
-        colorscale = [[0, 'darkblue'], [0.4, 'blue'], [0.5, 'green'], [0.6, 'darkgreen'], [0.8, 'saddlebrown'], [1.0, 'white']]
-        # Generate Continents via Perlin-ish noise (Simplified with Sin waves)
-        surface_color = np.sin(phi*3) + np.cos(theta*3) + np.random.rand(100, 100)*0.5
-        surface_color = (surface_color - surface_color.min()) / (surface_color.max() - surface_color.min()) # Normalize 0-1
+        surface = np.sin(phi*5) * np.cos(theta*5) # Dunes
+    elif 250 < temp < 320 and atmosphere > 20:
+        # EARTH-LIKE (Habitable)
+        colorscale = [[0, 'navy'], [0.4, 'blue'], [0.5, 'forestgreen'], [0.6, 'green'], [0.8, 'sienna'], [1, 'white']]
+        surface = np.sin(phi*3) + np.cos(theta*3) + np.random.rand(100, 100)*0.5
     else:
-        # Barren Rock
-        colorscale = 'Gray'
-        surface_color = np.random.rand(100, 100) # Craters
-        
-    return x, y, z, surface_color, colorscale
+        # DEAD ROCK / ICE
+        colorscale = 'Greys' if temp > 200 else 'Blues'
+        surface = np.random.rand(100, 100) # Craters
 
-# --- 3. THE UI LOGIC ---
+    return x, y, z, surface, colorscale
+
+# --- 3. UI DASHBOARD ---
 
 df, status = load_data()
 
-# SIDEBAR: COMMAND DECK
+# SIDEBAR
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg", width=100)
     st.title("EXO-HUNTER")
-    st.caption("GENESIS MODULE v5.0")
+    st.caption(f"SYSTEM STATUS: {status}")
+    mode = st.radio("SELECT MODULE", ["🌌 GALAXY SCANNER", "🧬 GENESIS LAB", "🚀 WARP DRIVE"], index=1)
     
-    mode = st.radio("SYSTEM MODE", ["🔭 GALAXY SCANNER", "🧬 GENESIS LAB (TERRAFORM)", "🚀 WARP DRIVE"], index=1)
-    
-    st.info(f"NETWORK STATUS: {status}")
     st.markdown("---")
-    st.write("**Candidate Selection:**")
-    selected_planet = st.selectbox("Load Planet Data", df['Name'].head(15))
-    planet_data = df[df['Name'] == selected_planet].iloc[0]
+    if mode == "🧬 GENESIS LAB":
+        st.write("**TARGET LOCK:**")
+        selected_planet = st.selectbox("Select Candidate", df['Name'].head(15))
+        planet_data = df[df['Name'] == selected_planet].iloc
 
-# --- MODULE 1: GENESIS LAB (The "Wow" Factor) ---
-if "GENESIS" in mode:
-    col_main, col_viz = st.columns([1, 2])
+# --- MODULE 1: GALAXY SCANNER (Fixed) ---
+if mode == "🌌 GALAXY SCANNER":
+    st.title("DEEP FIELD ARRAY")
+    st.markdown("Real-time 3D plotting of confirmed exoplanets within 50 Parsecs.")
     
-    with col_main:
-        st.header(f"// TERRAFORMING: {selected_planet}")
-        st.markdown("Modify atmospheric conditions to stabilize the climate.")
+    # 3D Scatter Plot (Fixed import)
+    fig = px.scatter_3d(
+        df.head(200), # Limit to 200 for speed
+        x='Distance', y='Temp', z='Radius',
+        color='Mass', size='Radius',
+        hover_name='Name',
+        color_continuous_scale='Viridis',
+        template='plotly_dark',
+        title="Local Stellar Neighborhood (Mass/Radius Distribution)"
+    )
+    
+    fig.update_layout(
+        scene=dict(
+            bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(gridcolor='#333'),
+            yaxis=dict(gridcolor='#333'),
+            zaxis=dict(gridcolor='#333'),
+        ), 
+        paper_bgcolor='rgba(0,0,0,0)',
+        font_color='#00f2ff',
+        height=700,
+        margin=dict(l=0, r=0, b=0, t=30)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# --- MODULE 2: GENESIS LAB (The Visual Stunner) ---
+elif mode == "🧬 GENESIS LAB":
+    c1, c2 = st.columns()
+    
+    with c1:
+        st.subheader(f"// ENGINEERING: {selected_planet}")
         
-        # CONTROLS
-        gh_gas = st.slider("Greenhouse Injection (ppm)", 0, 1000, 50, help="Co2 Density")
-        albedo = st.slider("Surface Albedo (Reflectivity)", 0.1, 1.0, 0.8, help="0.1 = Asphalt, 1.0 = Ice")
-        water = st.slider("Hydrosphere Coverage (%)", 0, 100, 10)
+        # Interactive Physics Sliders
+        gh_gas = st.slider("Greenhouse Density (ppm)", 0, 1000, 50)
+        albedo = st.slider("Surface Albedo", 0.1, 1.0, 0.8)
         
-        # PHYSICS CALCULATION
-        # Simplified Stefan-Boltzmann adjustment
+        # Real-time Calculation
         base_temp = planet_data['Temp']
+        # Simplified Greenhouse Formula
         new_temp = (base_temp * (1/albedo)**0.25) + (gh_gas * 0.15)
-        
-        # ESI CALCULATION (Habitability Score)
         esi = 1.0 - abs(new_temp - 288) / 288
         if esi < 0: esi = 0
         
-        # HUD METRICS
-        c1, c2 = st.columns(2)
-        c1.metric("Surface Temp", f"{new_temp:.0f} K", delta=f"{new_temp-288:.0f}K from Earth")
-        c2.metric("ESI Score", f"{esi:.2f}", delta="Habitability Index")
+        # HUD Metrics
+        st.markdown("---")
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("Surface Temp", f"{new_temp:.0f} K", delta=f"{new_temp-288:.0f} K")
+        col_m2.metric("Habitability", f"{esi:.2f}", delta="ESI Score")
         
-        if esi > 0.85:
-            st.success("✅ LIFE SUPPORT STABLE")
-            st.balloons()
+        if 260 < new_temp < 310:
+            st.success("✅ BIOSPHERE STABLE")
         elif new_temp > 373:
-            st.error("⚠️ CRITICAL: BOILING OCEANS")
-        elif new_temp < 200:
-            st.info("❄️ STATUS: FROZEN WASTELAND")
-            
-    with col_viz:
-        # THE PROCEDURAL RENDERER
-        st.subheader("ORBITAL VISUALIZATION")
-        
-        x, y, z, surface, colors = generate_procedural_planet(planet_data['Radius'], new_temp, gh_gas)
+            st.error("⚠️ WATER BOILING")
+        else:
+            st.info("❄️ SURFACE FROZEN")
+
+    with c2:
+        # The 3D Planet Renderer
+        x, y, z, surf, colors = generate_planet_texture(new_temp, gh_gas)
         
         fig = go.Figure(data=[go.Surface(
             x=x, y=y, z=z,
-            surfacecolor=surface,
+            surfacecolor=surf,
             colorscale=colors,
-            lighting=dict(ambient=0.4, diffuse=0.9, specular=0.1, roughness=0.9), # Realistic lighting
+            lighting=dict(ambient=0.4, diffuse=0.9, roughness=0.9, specular=0.1),
             lightposition=dict(x=100, y=100, z=0)
         )])
         
-        # Clean up the plot to look like a Hologram
         fig.update_layout(
-            title=dict(text=f"LIVE SIMULATION: {selected_planet}", font=dict(color="#00f2ff")),
+            title=dict(text="LIVE OPTICAL FEED", x=0.5, font=dict(color="#00f2ff", size=20)),
             scene=dict(
                 xaxis=dict(visible=False),
                 yaxis=dict(visible=False),
                 zaxis=dict(visible=False),
                 bgcolor='rgba(0,0,0,0)',
-                camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+                camera=dict(eye=dict(x=1.6, y=1.6, z=1.6))
             ),
             paper_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=30, b=0),
+            margin=dict(l=0, r=0, b=0, t=40),
             height=600
         )
         st.plotly_chart(fig, use_container_width=True)
 
-# --- MODULE 2: GALAXY SCANNER (Big Data) ---
-elif "SCANNER" in mode:
-    st.title("DEEP FIELD ARRAY")
+# --- MODULE 3: WARP DRIVE (Upgraded Visuals) ---
+elif mode == "🚀 WARP DRIVE":
+    st.title("RELATIVITY ENGINE")
+    st.markdown("Time Dilation Simulator (Lorentz Factor Calculator)")
     
-    # Advanced 3D Scatter with "Hover" physics
-    fig = px.scatter_3d(
-        df, x='Distance', y='Temp', z='Radius',
-        color='Mass', size='Radius',
-        hover_name='Name',
-        color_continuous_scale='Viridis',
-        template='plotly_dark'
-    )
-    fig.update_layout(
-        scene=dict(bgcolor='rgba(0,0,0,0)'), 
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='#00f2ff',
-        height=700
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- MODULE 3: WARP DRIVE (Relativity) ---
-elif "WARP" in mode:
-    st.title("RELATIVISTIC TRAJECTORY SOLVER")
-    
+    # 1. Inputs
     c1, c2 = st.columns(2)
-    dist = planet_data['Distance']
-    
     with c1:
-        velocity = st.slider("WARP VELOCITY (% c)", 0.1, 0.999, 0.5)
-        gamma = 1 / np.sqrt(1 - velocity**2)
-        
-        st.metric("Time Dilation Factor (γ)", f"{gamma:.4f}")
-        st.metric("Subjective Time (Ship)", f"{(dist/velocity)/gamma:.1f} Years")
-        st.metric("Observer Time (Earth)", f"{(dist/velocity):.1f} Years")
-        
+        target = st.selectbox("Destination", df['Name'].head(10))
+        dist = df[df['Name'] == target].iloc['Distance']
+        st.metric("Distance", f"{dist:.1f} Parsecs", f"{(dist*3.26):.1f} Light Years")
     with c2:
-        # VISUALIZING THE "TWIN PARADOX"
-        time_data = pd.DataFrame({
-            'Observer': ['Astronaut', 'Earth Control'],
-            'Years Aged': [(dist/velocity)/gamma, dist/velocity]
-        })
-        fig = px.bar(time_data, x='Years Aged', y='Observer', orientation='h', color='Observer', color_discrete_sequence=['#00f2ff', '#ff0055'])
-        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
-        st.plotly_chart(fig, use_container_width=True)
+        velocity = st.slider("Warp Velocity (% c)", 0.1, 0.999, 0.5, 0.001)
+    
+    # 2. Physics
+    gamma = 1 / np.sqrt(1 - velocity**2)
+    ship_time = (dist * 3.26) / velocity / gamma
+    earth_time = (dist * 3.26) / velocity
+    
+    # 3. New Visuals: COCKPIT GAUGES (No more crashing bar charts)
+    st.markdown("---")
+    g1, g2, g3 = st.columns(3)
+    
+    # Gauge 1: Time Dilation
+    fig_gamma = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = gamma,
+        title = {'text': "Time Dilation (γ)"},
+        gauge = {'axis': {'range': [1, 25]}, 'bar': {'color': "#00f2ff"},
+                 'steps': [{'range': [1, 5], 'color': "#333"}, {'range': [5, 25], 'color': "#111"}]}
+    ))
+    fig_gamma.update_layout(paper_bgcolor='rgba(0,0,0,0)', font={'color': "white", 'family': "Orbitron"})
+    g1.plotly_chart(fig_gamma, use_container_width=True)
+    
+    # Gauge 2: Ship Clock
+    g2.metric("Subjective Time (You)", f"{ship_time:.1f} Years", "Aged Less")
+    
+    # Gauge 3: Earth Clock
+    g3.metric("Observer Time (Earth)", f"{earth_time:.1f} Years", "Aged More")
+    
+    # Comparison Chart (Fixed)
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Bar(
+        y=['Years Passed'], x=[ship_time], name='Astronaut', orientation='h', marker_color='#00f2ff'
+    ))
+    fig_comp.add_trace(go.Bar(
+        y=['Years Passed'], x=[earth_time], name='Earth Control', orientation='h', marker_color='#ff0055'
+    ))
+    fig_comp.update_layout(
+        title="THE TWIN PARADOX",
+        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+        font_color='white', xaxis_title="Years"
+    )
+    st.plotly_chart(fig_comp, use_container_width=True)
